@@ -14,7 +14,8 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .agent import AiAgentHaAgent
-from .const import DOMAIN
+from .const import DOMAIN, SYSTEM_ENTRY_UNIQUE_ID
+from .utils import get_system_entry
 from .index_manager import IndexManager
 from .mcp_server import MCPServer
 

@@ -121,7 +121,7 @@ class MCPServer:
     def _get_shared_setting(self, key: str, default: Any) -> Any:
         """Get a shared setting from system entry with fallback to profile entry."""
         # Import here to avoid circular dependency
-        from . import get_system_entry
+        from .utils import get_system_entry
 
         # Try to get from system entry first
         system_entry = get_system_entry(self.hass)

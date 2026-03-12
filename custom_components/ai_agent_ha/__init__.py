@@ -395,29 +395,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Panel registration with proper error handling
-    panel_name = "ai_agent_ha"
+    panel_name = "home_ai_agent"
     try:
         if await _panel_exists(hass, panel_name):
-            _LOGGER.debug("AI Agent HA panel already exists, skipping registration")
-            return True
-
-        _LOGGER.debug("Registering AI Agent HA panel")
-        async_register_built_in_panel(
-            hass,
-            component_name="custom",
-            sidebar_title="AI Agent HA",
-            sidebar_icon="mdi:robot",
-            frontend_url_path=panel_name,
-            require_admin=False,
-            config={
-                "_panel_custom": {
-                    "name": "ai_agent_ha-panel",
-                    "module_url": "/frontend/ai_agent_ha/ai_agent_ha-panel.js",
-                    "embed_iframe": False,
-                }
-            },
-        )
-        _LOGGER.debug("AI Agent HA panel registered successfully")
+            _LOGGER.debug("Home AI Agent panel already exists, skipping registration")
+        else:
+            _LOGGER.debug("Registering Home AI Agent panel")
+            async_register_built_in_panel(
+                hass,
+                component_name="custom",
+                sidebar_title="Home AI Agent",
+                sidebar_icon="mdi:robot",
+                frontend_url_path=panel_name,
+                require_admin=False,
+                config={
+                    "_panel_custom": {
+                        "name": "ai_agent_ha-panel",
+                        "module_url": "/frontend/ai_agent_ha/ai_agent_ha-panel.js",
+                        "embed_iframe": False,
+                    }
+                },
+            )
+            _LOGGER.debug("Home AI Agent panel registered successfully")
     except Exception as e:
         _LOGGER.warning("Panel registration error: %s", str(e))
 
@@ -426,14 +425,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    if await _panel_exists(hass, "ai_agent_ha"):
+    if await _panel_exists(hass, "home_ai_agent"):
         try:
             from homeassistant.components.frontend import async_remove_panel
 
-            async_remove_panel(hass, "ai_agent_ha")
-            _LOGGER.debug("AI Agent HA panel removed successfully")
+            async_remove_panel(hass, "home_ai_agent")
+            _LOGGER.debug("Home AI Agent panel removed successfully")
         except Exception as e:
             _LOGGER.debug("Error removing panel: %s", str(e))
+
+    # Also try to remove the old panel name if it exists
+    if await _panel_exists(hass, "ai_agent_ha"):
+        try:
+            from homeassistant.components.frontend import async_remove_panel
+            async_remove_panel(hass, "ai_agent_ha")
+        except Exception:
+            pass
 
     # Stop MCP Server
     if DOMAIN in hass.data and "mcp_server" in hass.data[DOMAIN]:

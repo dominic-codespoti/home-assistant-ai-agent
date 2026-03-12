@@ -43,9 +43,9 @@ class IndexManager:
         self._gap_filling_in_progress = False  # Re-entrancy guard for gap-filling
         self._first_index_generated = False  # Skip gap-filling on first index (startup)
 
-    async def start(self) -> None:
+    async def async_setup(self) -> None:
         """Start index manager and set up event listeners."""
-        _LOGGER.info("Starting Smart Index Manager")
+        _LOGGER.info("Setting up Smart Index Manager")
 
         # Listen for entity registry changes
         @callback
@@ -59,7 +59,7 @@ class IndexManager:
             entity_registry_changed
         )
 
-        _LOGGER.info("✅ Smart Index Manager started successfully")
+        _LOGGER.info("✅ Smart Index Manager setup successfully")
         _LOGGER.debug("Index will be generated lazily on first request")
 
     def _schedule_refresh(self) -> None:
@@ -75,11 +75,11 @@ class IndexManager:
         """Refresh index after debounce delay."""
         try:
             await asyncio.sleep(self._refresh_debounce_seconds)
-            await self.refresh_index()
+            await self.async_update_index()
         except asyncio.CancelledError:
             _LOGGER.debug("Index refresh cancelled (newer change detected)")
 
-    async def refresh_index(self) -> None:
+    async def async_update_index(self) -> None:
         """Generate fresh index from current system state."""
         start_time = datetime.now()
         _LOGGER.info("Generating system structure index...")
@@ -107,7 +107,7 @@ class IndexManager:
     async def get_index(self) -> Dict[str, Any]:
         """Get the current index, generating if needed."""
         if self._index is None:
-            await self.refresh_index()
+            await self.async_update_index()
 
         return self._index or {}
 

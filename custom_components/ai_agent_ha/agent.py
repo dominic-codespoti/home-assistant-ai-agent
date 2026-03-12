@@ -8,8 +8,8 @@ from urllib.parse import quote
 
 import aiohttp
 import yaml  # type: ignore[import-untyped]
-import google.generativeai as genai
-from google.generativeai.types import content_types
+from google import genai
+from google.genai import types
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -600,22 +600,22 @@ class OpenAIClient(BaseAIClient):
 
 
 class GeminiClient(BaseAIClient):
-    def __init__(self, token, model="gemini-2.5-flash"):
+    def __init__(self, token, model="gemini-2.0-flash"):
         self.token = token.strip() if token else token
-        self.model_name = model
+        self.model_id = model
+        self.client = None
         if self.token:
-            genai.configure(api_key=self.token)
+            self.client = genai.Client(api_key=self.token, http_options={'api_version': 'v1alpha'})
 
     async def get_response(self, messages, **kwargs):
-        _LOGGER.debug("Making request to Gemini SDK with model: %s", self.model_name)
+        _LOGGER.debug("Making request to google-genai SDK with model: %s", self.model_id)
 
-        if not self.token:
-            raise Exception("Missing Gemini API key")
+        if not self.token or not self.client:
+            raise Exception("Missing Gemini API key or client initialization failed")
 
-        # Extract system instruction
+        # Extract system instruction and build history
         system_instruction = None
-        history = []
-        last_user_message = None
+        contents = []
 
         for msg in messages:
             role = msg.get("role")
@@ -624,35 +624,31 @@ class GeminiClient(BaseAIClient):
             if role == "system":
                 system_instruction = content
             elif role == "user":
-                if last_user_message:
-                    history.append(last_user_message)
-                last_user_message = {"role": "user", "parts": [content]}
+                contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
             elif role == "assistant":
                 parts = []
                 if content:
-                    parts.append(content)
+                    parts.append(types.Part(text=content))
                 if "tool_calls" in msg:
                     for tc in msg["tool_calls"]:
-                        # Convert to SDK function call format
-                        parts.append(content_types.FunctionCall(
-                            name=tc["name"],
-                            args=tc["arguments"]
+                        parts.append(types.Part(
+                            function_call=types.FunctionCall(
+                                name=tc["name"],
+                                args=tc["arguments"]
+                            )
                         ))
-                if last_user_message:
-                    history.append(last_user_message)
-                    last_user_message = None
-                history.append({"role": "model", "parts": parts})
+                if parts:
+                    contents.append(types.Content(role="model", parts=parts))
             elif role == "tool":
-                if last_user_message:
-                    history.append(last_user_message)
-                    last_user_message = None
-                history.append({
-                    "role": "function",
-                    "parts": [content_types.FunctionResponse(
-                        name=msg.get("name"),
-                        response={"result": content}
+                contents.append(types.Content(
+                    role="user", # The new SDK often uses 'user' for function response parts or specialized roles
+                    parts=[types.Part(
+                        function_response=types.FunctionResponse(
+                            name=msg.get("name"),
+                            response={"result": content}
+                        )
                     )]
-                })
+                ))
 
         # Tool definitions
         tools = []
@@ -662,50 +658,32 @@ class GeminiClient(BaseAIClient):
             for t in raw_tools:
                 if t.get("type") == "function":
                     func = t.get("function", {})
-                    # SDK handles nested dicts for parameters
+                    # Clean up parameters
                     params = func.get("parameters", {"type": "object", "properties": {}}).copy()
                     if "$schema" in params:
                         del params["$schema"]
                     
-                    function_declarations.append({
-                        "name": func["name"],
-                        "description": func.get("description", ""),
-                        "parameters": params
-                    })
+                    function_declarations.append(types.FunctionDeclaration(
+                        name=func["name"],
+                        description=func.get("description", ""),
+                        parameters=params
+                    ))
             if function_declarations:
-                tools = [{"function_declarations": function_declarations}]
-
-        # Initialize model
-        model = genai.GenerativeModel(
-            model_name=self.model_name,
-            tools=tools,
-            system_instruction=system_instruction
-        )
+                tools = [types.Tool(function_declarations=function_declarations)]
 
         try:
-            # chat_session = model.start_chat(history=history)
-            # Use generate_content directly with history for more control in this stateless loop
-            # Gemini SDK history roles must alternate user/model (except function responses)
-            
-            # The last message must be from the user
-            if not last_user_message:
-                # If the last thing was a tool result or assistant message, 
-                # we might need to nudge or the SDK might handle it if we send contents
-                contents = history
-            else:
-                contents = history + [last_user_message]
+            # Use native async support in google-genai
+            config = types.GenerateContentConfig(
+                temperature=0.7,
+                top_p=0.9,
+                tools=tools,
+                system_instruction=system_instruction
+            )
 
-            # Run in executor to avoid blocking HA loop (SDK is synchronous by default)
-            # Note: google-generativeai has some async support but executor is safer for general compatibility
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: model.generate_content(
-                    contents,
-                    generation_config=genai.GenerationConfig(
-                        temperature=0.7,
-                        top_p=0.9,
-                    )
-                )
+            response = await self.client.aio.models.generate_content(
+                model=self.model_id,
+                contents=contents,
+                config=config
             )
 
             # Process response
@@ -714,20 +692,22 @@ class GeminiClient(BaseAIClient):
             
             if response.candidates:
                 candidate = response.candidates[0]
-                for part in candidate.content.parts:
-                    if fn := part.function_call:
-                        # Convert proto-like object to dict
-                        args = {}
-                        for key, val in fn.args.items():
-                            args[key] = val
-                            
-                        tool_calls.append({
-                            "id": f"call_{int(time.time() * 1000)}", 
-                            "name": fn.name,
-                            "arguments": args
-                        })
-                    elif text := part.text:
-                        text_content += text
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if fn := part.function_call:
+                            # Convert to dict
+                            args = {}
+                            if fn.args:
+                                for key, val in fn.args.items():
+                                    args[key] = val
+                                    
+                            tool_calls.append({
+                                "id": f"call_{int(time.time() * 1000)}", 
+                                "name": fn.name,
+                                "arguments": args
+                            })
+                        elif text := part.text:
+                            text_content += text
 
             if tool_calls:
                 return json.dumps({
@@ -739,7 +719,7 @@ class GeminiClient(BaseAIClient):
             return text_content if text_content else str(response.text)
 
         except Exception as e:
-            _LOGGER.error("Gemini SDK error: %s", str(e))
+            _LOGGER.error("google-genai SDK error: %s", str(e))
             raise e
 
 

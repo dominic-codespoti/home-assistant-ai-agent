@@ -20,7 +20,7 @@
     "requirements": [
         "aiohttp>=3.8.0",
         "mcp>=1.2.0",
-        "google-generativeai"
+        "google-genai"
     ],
-    "version": "1.14"
+    "version": "1.15"
 }

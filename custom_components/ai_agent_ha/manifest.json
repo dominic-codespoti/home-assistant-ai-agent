@@ -19,7 +19,8 @@
     "issue_tracker": "https://github.com/dominic-codespoti/home-assistant-ai-agent/issues",
     "requirements": [
         "aiohttp>=3.8.0",
-        "mcp>=1.2.0"
+        "mcp>=1.2.0",
+        "google-generativeai>=0.8.0"
     ],
-    "version": "1.13"
+    "version": "1.14"
 }

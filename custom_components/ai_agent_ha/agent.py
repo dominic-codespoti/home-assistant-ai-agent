@@ -1,29 +1,3 @@
-"""The AI Agent implementation with multiple provider support.
-
-Example config:
-ai_agent_ha:
-  ai_provider: openai  # or 'llama', 'gemini', 'openrouter', 'anthropic', 'alter', 'zai', 'local'
-  llama_token: "..."
-  openai_token: "..."
-  gemini_token: "..."
-  openrouter_token: "..."
-  anthropic_token: "..."
-  alter_token: "..."
-  zai_token: "..."
-  zai_endpoint: "general"  # or 'coding' for z.ai (3× usage, 1/7 cost)
-  local_url: "http://localhost:11434/api/generate"  # Required for local models
-  # Model configuration (optional, defaults will be used if not specified)
-  models:
-    openai: "gpt-3.5-turbo"  # or "gpt-4", "gpt-4-turbo", etc.
-    llama: "Llama-4-Maverick-17B-128E-Instruct-FP8"
-    gemini: "gemini-2.5-flash"  # or "gemini-2.5-pro", "gemini-2.0-flash", etc.
-    openrouter: "openai/gpt-4o"  # or any model available on OpenRouter
-    anthropic: "claude-sonnet-4-5-20250929"  # or "claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229", etc.
-    alter: "your-model-name"  # model name for Alter API
-    zai: "glm-4.7"  # model name for z.ai API (glm-4.7, glm-4.6, glm-4.5, etc.)
-    local: "llama3.2"  # model name for local API (optional if your API doesn't require it)
-"""
-
 import asyncio
 import json
 import logging
@@ -34,6 +8,8 @@ from urllib.parse import quote
 
 import aiohttp
 import yaml  # type: ignore[import-untyped]
+import google.generativeai as genai
+from google.generativeai.types import content_types
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -625,145 +601,146 @@ class OpenAIClient(BaseAIClient):
 
 class GeminiClient(BaseAIClient):
     def __init__(self, token, model="gemini-2.5-flash"):
-        self.token = token.strip() if token else token  # Strip whitespace from token
-        self.model = model
-        # Use v1beta for all models as per Google's current API documentation
-        # All Gemini 2.0/2.5 models are available on v1beta endpoint
-        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        self.token = token.strip() if token else token
+        self.model_name = model
+        if self.token:
+            genai.configure(api_key=self.token)
 
     async def get_response(self, messages, **kwargs):
-        _LOGGER.debug("Making request to Gemini API with model: %s", self.model)
+        _LOGGER.debug("Making request to Gemini SDK with model: %s", self.model_name)
 
-        # Validate token
         if not self.token:
             raise Exception("Missing Gemini API key")
 
-        headers = {"Content-Type": "application/json"}
-
-        # Convert standard messages to Gemini format
-        gemini_contents = []
+        # Extract system instruction
         system_instruction = None
+        history = []
+        last_user_message = None
 
-        for message in messages:
-            role = message.get("role", "user")
-            content = message.get("content", "")
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
 
             if role == "system":
-                # Store system instruction for top-level payload field
-                system_instruction = {"parts": [{"text": content}]}
+                system_instruction = content
             elif role == "user":
-                gemini_contents.append({"role": "user", "parts": [{"text": content}]})
+                if last_user_message:
+                    history.append(last_user_message)
+                last_user_message = {"role": "user", "parts": [content]}
             elif role == "assistant":
                 parts = []
                 if content:
-                    parts.append({"text": content})
-                if "tool_calls" in message:
-                    for tc in message["tool_calls"]:
-                        parts.append({
-                            "functionCall": {
-                                "name": tc["name"],
-                                "args": tc["arguments"]
-                            }
-                        })
-                if parts:
-                    gemini_contents.append({"role": "model", "parts": parts})
+                    parts.append(content)
+                if "tool_calls" in msg:
+                    for tc in msg["tool_calls"]:
+                        # Convert to SDK function call format
+                        parts.append(content_types.FunctionCall(
+                            name=tc["name"],
+                            args=tc["arguments"]
+                        ))
+                if last_user_message:
+                    history.append(last_user_message)
+                    last_user_message = None
+                history.append({"role": "model", "parts": parts})
             elif role == "tool":
-                # Gemini expects role 'function' for tool responses
-                gemini_contents.append({
+                if last_user_message:
+                    history.append(last_user_message)
+                    last_user_message = None
+                history.append({
                     "role": "function",
-                    "parts": [{
-                        "functionResponse": {
-                            "name": message.get("name", "tool"),
-                            "response": {"result": content}
-                        }
-                    }]
+                    "parts": [content_types.FunctionResponse(
+                        name=msg.get("name"),
+                        response={"result": content}
+                    )]
                 })
 
-        payload = {
-            "contents": gemini_contents,
-            "generationConfig": {
-                "temperature": 0.7,
-                "topP": 0.9,
-            },
-        }
-
-        if system_instruction:
-            payload["system_instruction"] = system_instruction
-
-        tools = kwargs.get("tools")
-        if tools:
-            gemini_tools = []
-            for t in tools:
+        # Tool definitions
+        tools = []
+        raw_tools = kwargs.get("tools")
+        if raw_tools:
+            function_declarations = []
+            for t in raw_tools:
                 if t.get("type") == "function":
                     func = t.get("function", {})
-                    # Clean up parameters (Gemini is picky about $schema in tool calls)
+                    # SDK handles nested dicts for parameters
                     params = func.get("parameters", {"type": "object", "properties": {}}).copy()
                     if "$schema" in params:
                         del params["$schema"]
-
-                    gemini_tools.append({
-                        "name": func.get("name"),
+                    
+                    function_declarations.append({
+                        "name": func["name"],
                         "description": func.get("description", ""),
                         "parameters": params
                     })
-            if gemini_tools:
-                payload["tools"] = [{"functionDeclarations": gemini_tools}]
+            if function_declarations:
+                tools = [{"function_declarations": function_declarations}]
 
-        url_with_key = f"{self.api_url}?key={quote(self.token)}"
+        # Initialize model
+        model = genai.GenerativeModel(
+            model_name=self.model_name,
+            tools=tools,
+            system_instruction=system_instruction
+        )
 
-        _LOGGER.debug("Gemini request payload size limit: %d", len(json.dumps(payload)))
+        try:
+            # chat_session = model.start_chat(history=history)
+            # Use generate_content directly with history for more control in this stateless loop
+            # Gemini SDK history roles must alternate user/model (except function responses)
+            
+            # The last message must be from the user
+            if not last_user_message:
+                # If the last thing was a tool result or assistant message, 
+                # we might need to nudge or the SDK might handle it if we send contents
+                contents = history
+            else:
+                contents = history + [last_user_message]
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url_with_key,
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=300),
-            ) as resp:
-                response_text = await resp.text()
-                _LOGGER.debug("Gemini API response status: %d", resp.status)
+            # Run in executor to avoid blocking HA loop (SDK is synchronous by default)
+            # Note: google-generativeai has some async support but executor is safer for general compatibility
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: model.generate_content(
+                    contents,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.7,
+                        top_p=0.9,
+                    )
+                )
+            )
 
-                if resp.status != 200:
-                    _LOGGER.error("Gemini API error %d: %s", resp.status, response_text[:500])
-                    raise Exception(f"Gemini API error {resp.status}: {response_text[:200]}")
-
-                try:
-                    data = json.loads(response_text)
-                except json.JSONDecodeError as e:
-                    _LOGGER.error("Failed to parse Gemini response: %s", str(e))
-                    raise Exception(f"Invalid JSON response from Gemini: {response_text[:200]}")
-
-                candidates = data.get("candidates", [])
-                if candidates and "content" in candidates[0]:
-                    parts = candidates[0]["content"].get("parts", [])
-                    
-                    # Look for tool calls
-                    tool_calls = []
-                    text_content = ""
-                    for part in parts:
-                        if "functionCall" in part:
-                            fc = part["functionCall"]
-                            tool_calls.append({
-                                "id": f"call_{int(time.time() * 1000)}", # Gemini doesn't use IDs natively
-                                "name": fc.get("name"),
-                                "arguments": fc.get("args", {})
-                            })
-                        elif "text" in part:
-                            text_content += part["text"]
+            # Process response
+            tool_calls = []
+            text_content = ""
+            
+            if response.candidates:
+                candidate = response.candidates[0]
+                for part in candidate.content.parts:
+                    if fn := part.function_call:
+                        # Convert proto-like object to dict
+                        args = {}
+                        for key, val in fn.args.items():
+                            args[key] = val
                             
-                    if tool_calls:
-                        return json.dumps({
-                            "request_type": "_mcp_tool_calls",
-                            "tool_calls": tool_calls,
-                            "content": text_content
+                        tool_calls.append({
+                            "id": f"call_{int(time.time() * 1000)}", 
+                            "name": fn.name,
+                            "arguments": args
                         })
+                    elif text := part.text:
+                        text_content += text
 
-                    if text_content:
-                        return text_content
-                    else:
-                        _LOGGER.warning("Gemini returned empty text content and no functions")
-                
-                return str(data)
+            if tool_calls:
+                return json.dumps({
+                    "request_type": "_mcp_tool_calls",
+                    "tool_calls": tool_calls,
+                    "content": text_content
+                })
+
+            return text_content if text_content else str(response.text)
+
+        except Exception as e:
+            _LOGGER.error("Gemini SDK error: %s", str(e))
+            raise e
 
 
 class AnthropicClient(BaseAIClient):

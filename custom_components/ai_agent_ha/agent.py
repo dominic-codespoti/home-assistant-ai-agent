@@ -519,15 +519,46 @@ class OpenAIClient(BaseAIClient):
             is_restricted,
         )
 
+        # Map internal standardized messages to OpenAI-compatible messages
+        openai_messages = []
+        for msg in messages:
+            api_msg = {"role": msg.get("role", "user")}
+            if "content" in msg and msg["content"] is not None:
+                api_msg["content"] = msg["content"]
+                
+            if "tool_calls" in msg:
+                api_msg["tool_calls"] = []
+                for tc in msg["tool_calls"]:
+                    api_msg["tool_calls"].append({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc["arguments"])
+                        }
+                    })
+            if msg.get("role") == "tool":
+                api_msg["tool_call_id"] = msg.get("tool_call_id")
+            
+            # Ensure assistant messages with tool calls have at least null or empty content
+            if api_msg["role"] == "assistant" and "tool_calls" in api_msg and "content" not in api_msg:
+                api_msg["content"] = ""
+                
+            openai_messages.append(api_msg)
+
         # Build payload with model-appropriate parameters
         # Don't set max_tokens - let OpenAI use the model's maximum capacity
-        payload = {"model": self.model, "messages": messages}
+        payload = {"model": self.model, "messages": openai_messages}
 
         # Only add temperature and top_p for models that support them
         if not is_restricted:
             payload.update({"temperature": 0.7, "top_p": 0.9})
+            
+        tools = kwargs.get("tools")
+        if tools:
+            payload["tools"] = tools
 
-        _LOGGER.debug("OpenAI request payload: %s", json.dumps(payload, indent=2))
+        _LOGGER.debug("OpenAI request payload limit length: %s", len(json.dumps(payload)))
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -538,11 +569,10 @@ class OpenAIClient(BaseAIClient):
             ) as resp:
                 response_text = await resp.text()
                 _LOGGER.debug("OpenAI API response status: %d", resp.status)
-                _LOGGER.debug("OpenAI API response: %s", response_text[:500])
 
                 if resp.status != 200:
-                    _LOGGER.error("OpenAI API error %d: %s", resp.status, response_text)
-                    raise Exception(f"OpenAI API error {resp.status}: {response_text}")
+                    _LOGGER.error("OpenAI API error %d: %s", resp.status, response_text[:500])
+                    raise Exception(f"OpenAI API error {resp.status}: {response_text[:200]}")
 
                 try:
                     data = json.loads(response_text)
@@ -552,20 +582,43 @@ class OpenAIClient(BaseAIClient):
                         f"Invalid JSON response from OpenAI: {response_text[:200]}"
                     )
 
-                # Extract text from OpenAI response
+                # Extract text or tool calls from OpenAI response
                 choices = data.get("choices", [])
                 if choices and "message" in choices[0]:
-                    content = choices[0]["message"].get("content", "")
+                    msg = choices[0]["message"]
+                    
+                    if "tool_calls" in msg and msg["tool_calls"]:
+                        # Return standardized internal tool_calls response
+                        tool_calls = []
+                        for tc in msg["tool_calls"]:
+                            if tc.get("type") == "function":
+                                fn = tc.get("function", {})
+                                try:
+                                    args = json.loads(fn.get("arguments", "{}"))
+                                except json.JSONDecodeError:
+                                    args = {}
+                                tool_calls.append({
+                                    "id": tc.get("id"),
+                                    "name": fn.get("name"),
+                                    "arguments": args
+                                })
+                        return json.dumps({
+                            "request_type": "_mcp_tool_calls", 
+                            "tool_calls": tool_calls,
+                            "content": msg.get("content", "")
+                        })
+
+                    content = msg.get("content", "")
                     if not content:
                         _LOGGER.warning("OpenAI returned empty content in message")
                         _LOGGER.debug(
-                            "Full OpenAI response: %s", json.dumps(data, indent=2)
+                            "Full OpenAI response: %s", json.dumps(data, indent=2)[:500]
                         )
                     return content
                 else:
                     _LOGGER.warning("OpenAI response missing expected structure")
                     _LOGGER.debug(
-                        "Full OpenAI response: %s", json.dumps(data, indent=2)
+                        "Full OpenAI response: %s", json.dumps(data, indent=2)[:500]
                     )
                     return str(data)
 
@@ -587,41 +640,77 @@ class GeminiClient(BaseAIClient):
 
         headers = {"Content-Type": "application/json"}
 
-        # Convert OpenAI-style messages to Gemini format
+        # Convert standard messages to Gemini format
         gemini_contents = []
         for message in messages:
             role = message.get("role", "user")
-            content = message.get("content", "")
-
+            
             if role == "system":
-                # Gemini doesn't have a system role, so we prepend it to the first user message
+                # Gemini system instruction handled separately or prepended
+                content = message.get("content", "")
                 if not gemini_contents:
                     gemini_contents.append(
                         {"role": "user", "parts": [{"text": f"System: {content}"}]}
                     )
                 else:
-                    # Add system message as user message
                     gemini_contents.append(
                         {"role": "user", "parts": [{"text": f"System: {content}"}]}
                     )
             elif role == "user":
-                gemini_contents.append({"role": "user", "parts": [{"text": content}]})
+                gemini_contents.append({"role": "user", "parts": [{"text": message.get("content", "")}]})
             elif role == "assistant":
-                gemini_contents.append({"role": "model", "parts": [{"text": content}]})
+                parts = []
+                if "content" in message and message["content"]:
+                    parts.append({"text": message["content"]})
+                if "tool_calls" in message:
+                    for tc in message["tool_calls"]:
+                        parts.append({
+                            "functionCall": {
+                                "name": tc["name"],
+                                "args": tc["arguments"]
+                            }
+                        })
+                if parts:
+                    gemini_contents.append({"role": "model", "parts": parts})
+            elif role == "tool":
+                # Gemini expects functionResponses packaged within user role
+                # But actual Gemini API role should be 'user' or 'function' depending on library
+                # Native REST API expects a part with functionResponse in a 'user' message
+                gemini_contents.append({
+                    "role": "user",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": message.get("name", "tool"),
+                            "response": {"result": message.get("content", "")}
+                        }
+                    }]
+                })
 
         payload = {
             "contents": gemini_contents,
             "generationConfig": {
                 "temperature": 0.7,
                 "topP": 0.9,
-                # maxOutputTokens omitted - let Gemini use model's maximum capacity
             },
         }
 
-        # Add API key as query parameter (URL encoded)
+        tools = kwargs.get("tools")
+        if tools:
+            gemini_tools = []
+            for t in tools:
+                if t.get("type") == "function":
+                    func = t.get("function", {})
+                    gemini_tools.append({
+                        "name": func.get("name"),
+                        "description": func.get("description", ""),
+                        "parameters": func.get("parameters", {"type": "object", "properties": {}})
+                    })
+            if gemini_tools:
+                payload["tools"] = [{"functionDeclarations": gemini_tools}]
+
         url_with_key = f"{self.api_url}?key={quote(self.token)}"
 
-        _LOGGER.debug("Gemini request payload: %s", json.dumps(payload, indent=2))
+        _LOGGER.debug("Gemini request payload size limit: %d", len(json.dumps(payload)))
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -632,61 +721,47 @@ class GeminiClient(BaseAIClient):
             ) as resp:
                 response_text = await resp.text()
                 _LOGGER.debug("Gemini API response status: %d", resp.status)
-                _LOGGER.debug("Gemini API response: %s", response_text[:500])
 
                 if resp.status != 200:
-                    _LOGGER.error("Gemini API error %d: %s", resp.status, response_text)
-                    raise Exception(f"Gemini API error {resp.status}: {response_text}")
+                    _LOGGER.error("Gemini API error %d: %s", resp.status, response_text[:500])
+                    raise Exception(f"Gemini API error {resp.status}: {response_text[:200]}")
 
                 try:
                     data = json.loads(response_text)
                 except json.JSONDecodeError as e:
-                    _LOGGER.error("Failed to parse Gemini response as JSON: %s", str(e))
-                    raise Exception(
-                        f"Invalid JSON response from Gemini: {response_text[:200]}"
-                    )
+                    _LOGGER.error("Failed to parse Gemini response: %s", str(e))
+                    raise Exception(f"Invalid JSON response from Gemini: {response_text[:200]}")
 
-                # Log token usage for debugging, especially for Gemini 2.5 extended thinking
-                usage_metadata = data.get("usageMetadata", {})
-                if usage_metadata:
-                    _LOGGER.debug(
-                        "Gemini token usage - prompt: %d, total: %d, thoughts: %d",
-                        usage_metadata.get("promptTokenCount", 0),
-                        usage_metadata.get("totalTokenCount", 0),
-                        usage_metadata.get("thoughtsTokenCount", 0),
-                    )
-
-                # Extract text from Gemini response
                 candidates = data.get("candidates", [])
                 if candidates and "content" in candidates[0]:
-                    # Check finish reason for potential issues
-                    finish_reason = candidates[0].get("finishReason", "")
-                    if finish_reason == "MAX_TOKENS":
-                        _LOGGER.warning(
-                            "Gemini response truncated due to MAX_TOKENS limit. "
-                            "Thoughts used: %d tokens. Consider increasing maxOutputTokens.",
-                            usage_metadata.get("thoughtsTokenCount", 0),
-                        )
-
                     parts = candidates[0]["content"].get("parts", [])
-                    if parts:
-                        content = parts[0].get("text", "")
-                        if not content:
-                            _LOGGER.warning("Gemini returned empty text content")
-                            _LOGGER.debug(
-                                "Full Gemini response: %s", json.dumps(data, indent=2)
-                            )
-                        return content
+                    
+                    # Look for tool calls
+                    tool_calls = []
+                    text_content = ""
+                    for part in parts:
+                        if "functionCall" in part:
+                            fc = part["functionCall"]
+                            tool_calls.append({
+                                "id": f"call_{int(time.time() * 1000)}", # Gemini doesn't use IDs natively
+                                "name": fc.get("name"),
+                                "arguments": fc.get("args", {})
+                            })
+                        elif "text" in part:
+                            text_content += part["text"]
+                            
+                    if tool_calls:
+                        return json.dumps({
+                            "request_type": "_mcp_tool_calls",
+                            "tool_calls": tool_calls,
+                            "content": text_content
+                        })
+
+                    if text_content:
+                        return text_content
                     else:
-                        _LOGGER.warning("Gemini response missing parts")
-                        _LOGGER.debug(
-                            "Full Gemini response: %s", json.dumps(data, indent=2)
-                        )
-                else:
-                    _LOGGER.warning("Gemini response missing expected structure")
-                    _LOGGER.debug(
-                        "Full Gemini response: %s", json.dumps(data, indent=2)
-                    )
+                        _LOGGER.warning("Gemini returned empty text content and no functions")
+                
                 return str(data)
 
 
@@ -704,7 +779,7 @@ class AnthropicClient(BaseAIClient):
             "anthropic-version": "2023-06-01",
         }
 
-        # Convert OpenAI-style messages to Anthropic format
+        # Convert standardized messages to Anthropic format
         system_message = None
         anthropic_messages = []
 
@@ -718,7 +793,29 @@ class AnthropicClient(BaseAIClient):
             elif role == "user":
                 anthropic_messages.append({"role": "user", "content": content})
             elif role == "assistant":
-                anthropic_messages.append({"role": "assistant", "content": content})
+                if "tool_calls" in message:
+                    content_blocks = []
+                    if content:
+                        content_blocks.append({"type": "text", "text": content})
+                    for tc in message["tool_calls"]:
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tc["id"],
+                            "name": tc["name"],
+                            "input": tc["arguments"]
+                        })
+                    anthropic_messages.append({"role": "assistant", "content": content_blocks})
+                else:
+                    anthropic_messages.append({"role": "assistant", "content": content})
+            elif role == "tool":
+                anthropic_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": message["tool_call_id"],
+                        "content": content
+                    }]
+                })
 
         payload = {
             "model": self.model,
@@ -730,25 +827,58 @@ class AnthropicClient(BaseAIClient):
         # Add system message if present
         if system_message:
             payload["system"] = system_message
+            
+        tools = kwargs.get("tools")
+        if tools:
+            anthropic_tools = []
+            for t in tools:
+                if t.get("type") == "function":
+                    func = t.get("function", {})
+                    anthropic_tools.append({
+                        "name": func.get("name"),
+                        "description": func.get("description", ""),
+                        "input_schema": func.get("parameters", {"type": "object", "properties": {}})
+                    })
+            if anthropic_tools:
+                payload["tools"] = anthropic_tools
 
-        _LOGGER.debug("Anthropic request payload: %s", json.dumps(payload, indent=2))
+        _LOGGER.debug("Anthropic request payload size: %d", len(json.dumps(payload)))
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self.api_url,
                 headers=headers,
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=300),
             ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    _LOGGER.error("Anthropic API error %d: %s", resp.status, error_text)
+                    _LOGGER.error("Anthropic API error %d: %s", resp.status, error_text[:500])
                     raise Exception(f"Anthropic API error {resp.status}")
                 data = await resp.json()
-                # Extract text from Anthropic response
+                
+                if data.get("stop_reason") == "tool_use":
+                    tool_calls = []
+                    text_content = ""
+                    for block in data.get("content", []):
+                        if block.get("type") == "tool_use":
+                            tool_calls.append({
+                                "id": block.get("id"),
+                                "name": block.get("name"),
+                                "arguments": block.get("input")
+                            })
+                        elif block.get("type") == "text":
+                            text_content += block.get("text", "")
+                            
+                    return json.dumps({
+                        "request_type": "_mcp_tool_calls",
+                        "tool_calls": tool_calls,
+                        "content": text_content
+                    })
+
+                # Extract text from plain response
                 content_blocks = data.get("content", [])
                 if content_blocks and isinstance(content_blocks, list):
-                    # Get the text from the first content block
                     for block in content_blocks:
                         if block.get("type") == "text":
                             return block.get("text", str(data))
@@ -769,15 +899,43 @@ class OpenRouterClient(BaseAIClient):
             "HTTP-Referer": "https://home-assistant.io",  # Optional for OpenRouter rankings
             "X-Title": "Home Assistant AI Agent",  # Optional for OpenRouter rankings
         }
+
+        # Same mapping logic as OpenAI
+        openai_messages = []
+        for msg in messages:
+            api_msg = {"role": msg.get("role", "user")}
+            if "content" in msg and msg["content"] is not None:
+                api_msg["content"] = msg["content"]
+            if "tool_calls" in msg:
+                api_msg["tool_calls"] = []
+                for tc in msg["tool_calls"]:
+                    api_msg["tool_calls"].append({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc["arguments"])
+                        }
+                    })
+            if msg.get("role") == "tool":
+                api_msg["tool_call_id"] = msg.get("tool_call_id")
+            
+            if api_msg["role"] == "assistant" and "tool_calls" in api_msg and "content" not in api_msg:
+                api_msg["content"] = ""
+            openai_messages.append(api_msg)
+
         payload = {
             "model": self.model,
-            "messages": messages,
+            "messages": openai_messages,
             "temperature": 0.7,
             "top_p": 0.9,
-            # max_tokens omitted - let OpenRouter use the model's maximum capacity
         }
+        
+        tools = kwargs.get("tools")
+        if tools:
+            payload["tools"] = tools
 
-        _LOGGER.debug("OpenRouter request payload: %s", json.dumps(payload, indent=2))
+        _LOGGER.debug("OpenRouter request payload size limit: %d", len(json.dumps(payload)))
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -788,21 +946,37 @@ class OpenRouterClient(BaseAIClient):
             ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    _LOGGER.error(
-                        "OpenRouter API error %d: %s", resp.status, error_text
-                    )
+                    _LOGGER.error("OpenRouter API error %d: %s", resp.status, error_text[:500])
                     raise Exception(f"OpenRouter API error {resp.status}")
                 data = await resp.json()
-                # Extract text from OpenRouter response (OpenAI-compatible format)
+
                 choices = data.get("choices", [])
                 if not choices:
-                    _LOGGER.warning("OpenRouter response missing choices")
-                    _LOGGER.debug(
-                        "Full OpenRouter response: %s", json.dumps(data, indent=2)
-                    )
                     return str(data)
+                
                 if choices and "message" in choices[0]:
-                    return choices[0]["message"].get("content", str(data))
+                    msg = choices[0]["message"]
+                    if "tool_calls" in msg and msg["tool_calls"]:
+                        tool_calls = []
+                        for tc in msg["tool_calls"]:
+                            if tc.get("type") == "function":
+                                fn = tc.get("function", {})
+                                try:
+                                    args = json.loads(fn.get("arguments", "{}"))
+                                except json.JSONDecodeError:
+                                    args = {}
+                                tool_calls.append({
+                                    "id": tc.get("id"),
+                                    "name": fn.get("name"),
+                                    "arguments": args
+                                })
+                        return json.dumps({
+                            "request_type": "_mcp_tool_calls", 
+                            "tool_calls": tool_calls,
+                            "content": msg.get("content", "")
+                        })
+
+                    return msg.get("content", str(data))
                 return str(data)
 
 
@@ -2740,6 +2914,11 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
             max_iterations = 5  # Prevent infinite loops
             iteration = 0
 
+            # Fetch MCP tools once
+            available_tools = await self._get_mcp_tools()
+            if available_tools:
+                _LOGGER.debug(f"Retrieved {len(available_tools)} MCP tools for prompt injection.")
+
             while iteration < max_iterations:
                 iteration += 1
                 _LOGGER.debug(f"Processing iteration {iteration} of {max_iterations}")
@@ -2747,7 +2926,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                 try:
                     # Get AI response
                     _LOGGER.debug("Requesting response from AI provider")
-                    response = await self._get_ai_response()
+                    response = await self._get_ai_response(tools=available_tools)
                     _LOGGER.debug("Received response from AI provider: %s", response)
 
                     try:
@@ -2872,7 +3051,55 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                             "update_dashboard",
                         ]
 
-                        if (
+                        if response_data.get("request_type") == "_mcp_tool_calls":
+                            tool_calls = response_data.get("tool_calls", [])
+                            text_content = response_data.get("content", "")
+                            
+                            # Log assistant's message to conversation
+                            assistant_msg = {
+                                "role": "assistant",
+                                "content": text_content,
+                                "tool_calls": tool_calls
+                            }
+                            self.conversation_history.append(assistant_msg)
+                            
+                            # Execute each tool
+                            mcp_server = self.hass.data[DOMAIN].get("mcp_server")
+                            for tc in tool_calls:
+                                tool_name = tc.get("name")
+                                arguments = tc.get("arguments", {})
+                                tool_id = tc.get("id")
+                                
+                                _LOGGER.debug(f"Executing MCP tool {tool_name} with args {arguments}")
+                                try:
+                                    if mcp_server and hasattr(mcp_server, "mcp_server"):
+                                        # Use the SDK's call_tool logic
+                                        result_objs = await mcp_server.mcp_server.call_tool(tool_name, arguments)
+                                        # Convert SDK content objects back to JSON-RPC-like dict for current history format
+                                        # or just stringify the contents
+                                        content_list = []
+                                        for obj in result_objs:
+                                            if hasattr(obj, "text"):
+                                                content_list.append({"type": "text", "text": obj.text})
+                                        
+                                        result = {"content": content_list}
+                                        result_text = json.dumps(result, default=str)
+                                    else:
+                                        result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": "MCP Server (SDK) not running."}]})
+                                except Exception as e:
+                                    _LOGGER.error(f"Error executing MCP tool {tool_name}: {e}")
+                                    result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": str(e)}]})
+                                
+                                self.conversation_history.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_id,
+                                    "name": tool_name,
+                                    "content": result_text
+                                })
+                                
+                            continue
+
+                        elif (
                             response_data.get("request_type") == "data_request"
                             or response_data.get("request_type") in data_request_types
                         ):
@@ -3468,16 +3695,40 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
             "conversation": history_tail,
         }
 
-    async def _get_ai_response(self) -> str:
+    async def _get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """Fetch available MCP tools from the local server instance."""
+        mcp_server = self.hass.data[DOMAIN].get("mcp_server")
+        if not mcp_server or not hasattr(mcp_server, "mcp_server"):
+            return []
+            
+        try:
+            # Get tools directly from the official Server instance
+            tools = await mcp_server.mcp_server.list_tools()
+            openai_tools = []
+            for tool in tools:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.inputSchema
+                    }
+                })
+            return openai_tools
+        except Exception as e:
+            _LOGGER.error("Error getting MCP tools from SDK: %s", str(e))
+            return []
+
+    async def _get_ai_response(self, tools: Optional[List[Dict[str, Any]]] = None) -> str:
         """Get response from the selected AI provider with retries and rate limiting."""
         if not self._check_rate_limit():
             raise Exception("Rate limit exceeded. Please try again later.")
         retry_count = 0
         last_error = None
-        # Limit conversation history to last 10 messages to prevent token overflow
+        # Limit conversation history to last 15 messages to prevent token overflow
         recent_messages = (
-            self.conversation_history[-10:]
-            if len(self.conversation_history) > 10
+            self.conversation_history[-15:]
+            if len(self.conversation_history) > 15
             else self.conversation_history
         )
         # Ensure system prompt is always the first message
@@ -3494,7 +3745,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                     retry_count + 1,
                     self._max_retries,
                 )
-                response = await self.ai_client.get_response(recent_messages)
+                response = await self.ai_client.get_response(recent_messages, tools=tools)
                 _LOGGER.debug(
                     "AI client returned response of length: %d", len(response or "")
                 )

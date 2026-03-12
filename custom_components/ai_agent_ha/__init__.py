@@ -15,6 +15,8 @@ from homeassistant.helpers.typing import ConfigType
 
 from .agent import AiAgentHaAgent
 from .const import DOMAIN
+from .index_manager import IndexManager
+from .mcp_server import MCPServer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,6 +119,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["agents"][provider] = AiAgentHaAgent(hass, config_data)
 
         _LOGGER.info("Successfully set up AI Agent HA for provider: %s", provider)
+
+        # Set up MCP capabilities
+        if "index_manager" not in hass.data[DOMAIN]:
+            _LOGGER.debug("Initializing IndexManager")
+            index_manager = IndexManager(hass)
+            await index_manager.async_setup()
+            hass.data[DOMAIN]["index_manager"] = index_manager
+            
+            # Hook into device registry updates
+            from homeassistant.helpers import device_registry as dr
+            from homeassistant.helpers import entity_registry as er
+            from homeassistant.helpers import area_registry as ar
+            
+            async def index_update_listener(event):
+                await index_manager.async_update_index()
+                
+            hass.data[DOMAIN]["listeners"] = [
+                hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, index_update_listener),
+                hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, index_update_listener),
+                hass.bus.async_listen(ar.EVENT_AREA_REGISTRY_UPDATED, index_update_listener)
+            ]
+
+        if "mcp_server" not in hass.data[DOMAIN]:
+            _LOGGER.debug("Starting MCPServer")
+            # We use an empty dict for config entry settings here
+            # as mcp parameters can optionally be passed depending on how
+            # they were captured in config_flow (port, allowed_ips)
+            mcp_server_config = type('Config', (), {'options': config_data, 'data': config_data, 'entry_id': entry.entry_id})()
+            mcp_server = MCPServer(hass, mcp_server_config)
+            hass.data[DOMAIN]["mcp_server"] = mcp_server
+            
+            # Start server using create_task to avoid blocking
+            hass.loop.create_task(mcp_server.start())
 
     except KeyError as err:
         _LOGGER.error("Missing required configuration key: %s", err)
@@ -399,6 +434,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("AI Agent HA panel removed successfully")
         except Exception as e:
             _LOGGER.debug("Error removing panel: %s", str(e))
+
+    # Stop MCP Server
+    if DOMAIN in hass.data and "mcp_server" in hass.data[DOMAIN]:
+        try:
+            _LOGGER.debug("Stopping MCP Server")
+            await hass.data[DOMAIN]["mcp_server"].stop()
+        except Exception as e:
+            _LOGGER.error("Error stopping MCP server: %e", e)
+            
+    # Cleanup Listeners
+    if DOMAIN in hass.data and "listeners" in hass.data[DOMAIN]:
+        for unsub in hass.data[DOMAIN]["listeners"]:
+            unsub()
 
     # Remove services
     hass.services.async_remove(DOMAIN, "query")

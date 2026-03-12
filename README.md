@@ -8,18 +8,6 @@ A powerful Home Assistant custom integration that connects your Home Assistant i
 
 Click the button above to install AI Agent HA directly through HACS, or see the [detailed installation instructions](#-installation) below.
 
-
-## ☕ Support the Project
-
-If you find this integration helpful and would like to support its development, you can buy me a coffee! Your support helps keep this project active and maintained. Currently I am the only Dev on that project and looking to have more paretners here.
-
-[![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-tips-yellow.svg)](https://www.buymeacoffee.com/sbenodiz)
-
-Every contribution, no matter how small, is greatly appreciated and helps fund the continued development and improvement of AI Agent HA.
-
-Another way to support me will be to try my new project. Askie - AI for kids. I am looking for feedback on this one: ⁠Web: https://kidsai.app • ⁠iOS: https://apps.apple.com/app/id6749299565  ⁠Android: https://play.google.com/store/apps/details?id=com.askie.app
-
-
 ## ✨ Features
 
 - 🤖 **Multiple AI Provider Support**: OpenAI, Google Gemini, Anthropic (Claude), OpenRouter, Alter, z.ai, and Llama
@@ -31,6 +19,7 @@ Another way to support me will be to try my new project. Askie - AI for kids. I 
 - 🔒 **Secure**: API keys stored securely in Home Assistant
 - 🎨 **Beautiful UI**: Clean, modern chat interface
 - 🔄 **Real-time**: Instant responses and updates
+- 🔌 **MCP Server Capabilities**: Exposes Home Assistant to external MCP clients (Claude Desktop, cursor, etc) for discovering and interacting with Home Assistant entities.
 
 ## 📸 Screenshots
 
@@ -264,6 +253,12 @@ The AI can access comprehensive Home Assistant data:
 - Area/room information
 - Statistics and analytics
 
+### Model Context Protocol (MCP) Server
+The AI Agent HA integration bundles an **MCP Server** out-of-the-box. This powerful feature allows external AI clients supporting the Model Context Protocol (such as Claude Desktop, Cursor, or LM Studio) to directly discover Home Assistant entities, read their states, and perform actions without any extra configuration other than pointing the client to the exposed Home Assistant MCP web socket.
+- Default Port: `8124`
+- Connect via: `ws://<your-ha-ip>:8124/ws`
+- Features: Entity Discovery, History Retrieval, Automation & Script Execution, Web Search (via Brave).
+
 ## 🛠️ Development
 
 ### Contributing
@@ -365,6 +360,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Home Assistant community for the excellent platform
 - All AI providers for their powerful APIs
 - Special thanks to @RmG152 for their valuable help with development
+- Huge thanks to Mike Nott and the **[mcp-assist](https://github.com/mike-nott/mcp-assist)** project, from which the core MCP server capabilities were adopted.
 - Contributors and testers who help improve this integration
 
 ---

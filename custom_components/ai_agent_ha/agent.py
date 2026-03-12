@@ -642,26 +642,21 @@ class GeminiClient(BaseAIClient):
 
         # Convert standard messages to Gemini format
         gemini_contents = []
+        system_instruction = None
+
         for message in messages:
             role = message.get("role", "user")
-            
+            content = message.get("content", "")
+
             if role == "system":
-                # Gemini system instruction handled separately or prepended
-                content = message.get("content", "")
-                if not gemini_contents:
-                    gemini_contents.append(
-                        {"role": "user", "parts": [{"text": f"System: {content}"}]}
-                    )
-                else:
-                    gemini_contents.append(
-                        {"role": "user", "parts": [{"text": f"System: {content}"}]}
-                    )
+                # Store system instruction for top-level payload field
+                system_instruction = {"parts": [{"text": content}]}
             elif role == "user":
-                gemini_contents.append({"role": "user", "parts": [{"text": message.get("content", "")}]})
+                gemini_contents.append({"role": "user", "parts": [{"text": content}]})
             elif role == "assistant":
                 parts = []
-                if "content" in message and message["content"]:
-                    parts.append({"text": message["content"]})
+                if content:
+                    parts.append({"text": content})
                 if "tool_calls" in message:
                     for tc in message["tool_calls"]:
                         parts.append({
@@ -673,15 +668,13 @@ class GeminiClient(BaseAIClient):
                 if parts:
                     gemini_contents.append({"role": "model", "parts": parts})
             elif role == "tool":
-                # Gemini expects functionResponses packaged within user role
-                # But actual Gemini API role should be 'user' or 'function' depending on library
-                # Native REST API expects a part with functionResponse in a 'user' message
+                # Gemini expects role 'function' for tool responses
                 gemini_contents.append({
-                    "role": "user",
+                    "role": "function",
                     "parts": [{
                         "functionResponse": {
                             "name": message.get("name", "tool"),
-                            "response": {"result": message.get("content", "")}
+                            "response": {"result": content}
                         }
                     }]
                 })
@@ -694,16 +687,24 @@ class GeminiClient(BaseAIClient):
             },
         }
 
+        if system_instruction:
+            payload["system_instruction"] = system_instruction
+
         tools = kwargs.get("tools")
         if tools:
             gemini_tools = []
             for t in tools:
                 if t.get("type") == "function":
                     func = t.get("function", {})
+                    # Clean up parameters (Gemini is picky about $schema in tool calls)
+                    params = func.get("parameters", {"type": "object", "properties": {}}).copy()
+                    if "$schema" in params:
+                        del params["$schema"]
+
                     gemini_tools.append({
                         "name": func.get("name"),
                         "description": func.get("description", ""),
-                        "parameters": func.get("parameters", {"type": "object", "properties": {}})
+                        "parameters": params
                     })
             if gemini_tools:
                 payload["tools"] = [{"functionDeclarations": gemini_tools}]

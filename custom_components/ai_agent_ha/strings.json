@@ -47,7 +47,7 @@
             "alter_token": "Alter API key is required"
         },
         "abort": {
-            "already_configured": "AI Agent HA is already configured"
+            "already_configured": "Home AI Agent is already configured"
         }
     },
     "options": {

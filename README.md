@@ -1,10 +1,10 @@
-# AI Agent HA
+# Home AI Agent
 
 A powerful Home Assistant custom integration that connects your Home Assistant instance with multiple AI providers (OpenAI, Google Gemini, Anthropic (Claude), OpenRouter, Alter, z.ai, and Llama) to translate user requests into valid Home Assistant operations, including creating automations automatically!
 
 ## 🚀 Quick Install
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sbenodiz&repository=ai_agent_ha&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dominic-codespoti&repository=home-assistant-ai-agent&category=integration)
 
 Click the button above to install AI Agent HA directly through HACS, or see the [detailed installation instructions](#-installation) below.
 

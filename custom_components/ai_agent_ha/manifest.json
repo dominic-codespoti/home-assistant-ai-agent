@@ -7,16 +7,16 @@
         "lovelace"
     ],
     "codeowners": [
-        "@sbenodiz"
+        "@dominic-codespoti"
     ],
     "config_flow": true,
     "dependencies": [
         "http"
     ],
-    "documentation": "https://github.com/sbenodiz/ai_agent_ha",
+    "documentation": "https://github.com/dominic-codespoti/home-assistant-ai-agent",
     "integration_type": "service",
     "iot_class": "cloud_polling",
-    "issue_tracker": "https://github.com/sbenodiz/ai_agent_ha/issues",
+    "issue_tracker": "https://github.com/dominic-codespoti/home-assistant-ai-agent/issues",
     "requirements": [
         "aiohttp>=3.8.0",
         "mcp>=1.2.0"

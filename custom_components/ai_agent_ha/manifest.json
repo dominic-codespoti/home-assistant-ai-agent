@@ -1,6 +1,6 @@
 {
     "domain": "ai_agent_ha",
-    "name": "AI Agent HA",
+    "name": "Home AI Agent",
     "after_dependencies": [
         "history",
         "recorder",
@@ -21,5 +21,5 @@
         "aiohttp>=3.8.0",
         "mcp>=1.2.0"
     ],
-    "version": "1.08"
+    "version": "1.09"
 }

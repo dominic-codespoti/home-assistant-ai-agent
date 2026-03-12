@@ -36,7 +36,8 @@ class AiAgentHaPanel extends LitElement {
       _showProviderDropdown: { type: Boolean, reflect: false, attribute: false },
       _showThinking: { type: Boolean, reflect: false, attribute: false },
       _thinkingExpanded: { type: Boolean, reflect: false, attribute: false },
-      _debugInfo: { type: Object, reflect: false, attribute: false }
+      _debugInfo: { type: Object, reflect: false, attribute: false },
+      _activeToolCall: { type: Object, reflect: false, attribute: false }
     };
   }
 
@@ -644,6 +645,7 @@ class AiAgentHaPanel extends LitElement {
     this._showThinking = false;
     this._thinkingExpanded = false;
     this._debugInfo = null;
+    this._activeToolCall = null;
     console.debug("AI Agent HA Panel constructor called");
   }
 
@@ -661,6 +663,10 @@ class AiAgentHaPanel extends LitElement {
       this.hass.connection.subscribeEvents(
         (event) => this._handleLlamaResponse(event),
         'ai_agent_ha_response'
+      );
+      this.hass.connection.subscribeEvents(
+        (event) => this._handleToolCallEvent(event),
+        'ai_agent_ha_tool_call'
       );
       console.debug("Event subscription set up in connectedCallback()");
       // Load prompt history from Home Assistant storage
@@ -684,6 +690,10 @@ class AiAgentHaPanel extends LitElement {
       this.hass.connection.subscribeEvents(
         (event) => this._handleLlamaResponse(event),
         'ai_agent_ha_response'
+      );
+      this.hass.connection.subscribeEvents(
+        (event) => this._handleToolCallEvent(event),
+        'ai_agent_ha_tool_call'
       );
       console.debug("Event subscription set up in updated()");
     }
@@ -1012,7 +1022,11 @@ class AiAgentHaPanel extends LitElement {
             `)}
             ${this._isLoading ? html`
               <div class="loading">
-                <span>AI Agent is thinking</span>
+                <span>
+                  ${this._activeToolCall 
+                    ? `Executing: ${this._activeToolCall.tool.replace('_', ' ')}...` 
+                    : 'AI Agent is thinking'}
+                </span>
                 <div class="loading-dots">
                   <div class="dot"></div>
                   <div class="dot"></div>
@@ -1248,16 +1262,19 @@ class AiAgentHaPanel extends LitElement {
 
       console.debug("Adding message to UI:", message);
       this._messages = [...this._messages, message];
+      this._activeToolCall = null; // Clear active tool call on response
     } else {
       this._error = event.data.error || 'An error occurred';
       this._messages = [
         ...this._messages,
         { type: 'assistant', text: `Error: ${this._error}` }
       ];
+      this._activeToolCall = null; // Clear active tool call on error
     }
     } catch (error) {
       console.error("Error in _handleLlamaResponse:", error);
       this._clearLoadingState();
+      this._activeToolCall = null; // Clear on exception
       this._error = 'An error occurred while processing the response';
       this._messages = [...this._messages, {
         type: 'assistant',
@@ -1475,6 +1492,12 @@ class AiAgentHaPanel extends LitElement {
         ` : ''}
       </div>
     `;
+  }
+
+  _handleToolCallEvent(event) {
+    console.debug("Received tool call event:", event.data);
+    this._activeToolCall = event.data;
+    this.requestUpdate();
   }
 }
 

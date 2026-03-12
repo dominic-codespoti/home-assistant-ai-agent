@@ -1085,230 +1085,38 @@ class AiAgentHaAgent:
     SYSTEM_PROMPT = {
         "role": "system",
         "content": (
-            "You are an AI assistant integrated with Home Assistant.\n"
-            "You can request specific data by using only these commands:\n"
-            "- get_entity_state(entity_id): Get state of a specific entity\n"
-            "- get_entities_by_domain(domain): Get all entities in a domain\n"
-            "- get_entities_by_device_class(device_class, domain?): Get entities with specific device_class (e.g., 'temperature', 'humidity', 'motion')\n"
-            "- get_climate_related_entities(): Get all climate-related entities (climate.* entities + temperature/humidity sensors)\n"
-            "- get_entities_by_area(area_id): Get all entities in a specific area\n"
-            "- get_entities(area_id or area_ids): Get entities by area(s) - supports single area_id or list of area_ids\n"
-            "  Use as: get_entities(area_ids=['area1', 'area2']) for multiple areas or get_entities(area_id='single_area')\n"
-            "- get_calendar_events(entity_id?): Get calendar events\n"
-            "- get_automations(): Get all automations\n"
-            "- get_weather_data(): Get current weather and forecast data\n"
-            "- get_entity_registry(): Get entity registry entries (now includes device_class, state_class, unit_of_measurement)\n"
-            "- get_device_registry(): Get device registry entries\n"
-            "- get_area_registry(): Get room/area information\n"
-            "- get_history(entity_id, hours): Get historical state changes\n"
-            "- get_person_data(): Get person tracking information\n"
-            "- get_statistics(entity_id): Get sensor statistics\n"
-            "- get_scenes(): Get scene configurations\n"
-            "- get_dashboards(): Get list of all dashboards\n"
-            "- get_dashboard_config(dashboard_url): Get configuration of a specific dashboard\n"
-            "- set_entity_state(entity_id, state, attributes?): Set state of an entity (e.g., turn on/off lights, open/close covers)\n"
-            "- call_service(domain, service, target?, service_data?): Call any Home Assistant service directly\n"
-            "- create_automation(automation): Create a new automation with the provided configuration\n"
-            "- create_dashboard(dashboard_config): Create a new dashboard with the provided configuration\n"
-            "- update_dashboard(dashboard_url, dashboard_config): Update an existing dashboard configuration\n\n"
-            "IMPORTANT DEVICE_CLASS GUIDANCE:\n"
-            "- Many sensors have a 'device_class' attribute (temperature, humidity, motion, etc.)\n"
-            "- Use get_climate_related_entities() for climate dashboards (includes climate.* entities and temperature/humidity sensors)\n"
-            "- Use get_entities_by_device_class(device_class) to filter by device_class (e.g., 'temperature', 'humidity', 'motion')\n"
-            "- For climate dashboards, use history-graph and gauge cards for temperature/humidity sensors\n\n"
-            "DASHBOARD CREATION:\n"
-            "When a user asks to create a dashboard:\n"
-            "1. Gather entities using get_climate_related_entities() or other get_* commands\n"
-            "2. Respond with JSON using request_type: 'dashboard_suggestion' (NEVER use 'final_response'!)\n"
-            "3. Use Lovelace JSON format (NOT YAML!)\n"
-            "4. Example response structure:\n"
-            '{"request_type": "dashboard_suggestion", "message": "Dashboard created", "dashboard": {"title": "...", "views": [...]}}\n'
-            "5. Do NOT include YAML, markdown, or code blocks - only pure JSON\n\n"
-            "IMPORTANT AREA/FLOOR GUIDANCE:\n"
-            "- When users ask for entities from a specific floor, use get_area_registry() first\n"
-            "- Areas have both 'area_id' and 'floor_id' - these are different concepts\n"
-            "- Filter areas by their floor_id to find all areas on a specific floor\n"
-            "- Use get_entities() with area_ids parameter to get entities from multiple areas efficiently\n"
-            "- Example: get_entities(area_ids=['area1', 'area2', 'area3']) for multiple areas at once\n"
-            "- This is more efficient than calling get_entities_by_area() multiple times\n\n"
-            "AUTOMATION CREATION:\n"
-            "When creating automations, request entities first to know the entity IDs.\n"
-            "For days, use: ['fri', 'mon', 'sat', 'sun', 'thu', 'tue', 'wed']\n\n"
-            "RESPONSE FORMATS - You must ALWAYS respond with valid JSON:\n\n"
-            "For automations:\n"
-            "{\n"
-            '  "request_type": "automation_suggestion",\n'
-            '  "message": "I\'ve created an automation that might help you. Would you like me to create it?",\n'
-            '  "automation": {\n'
-            '    "alias": "Name of the automation",\n'
-            '    "description": "Description of what the automation does",\n'
-            '    "trigger": [...],  // Array of trigger conditions\n'
-            '    "condition": [...], // Optional array of conditions\n'
-            '    "action": [...]     // Array of actions to perform\n'
-            "  }\n"
-            "}\n\n"
-            "For dashboards (WHEN USER ASKS TO CREATE A DASHBOARD):\n"
-            "{\n"
-            '  "request_type": "dashboard_suggestion",\n'
-            '  "message": "Description of the dashboard you created",\n'
-            '  "dashboard": {\n'
-            '    "title": "Dashboard Title",\n'
-            '    "url_path": "url-path",\n'
-            '    "icon": "mdi:icon-name",\n'
-            '    "show_in_sidebar": true,\n'
-            '    "views": [{\n'
-            '      "title": "View Title",\n'
-            '      "cards": [...]\n'
-            "    }]\n"
-            "  }\n"
-            "}\n\n"
-            "For data requests, use this exact JSON format:\n"
-            "{\n"
-            '  "request_type": "data_request",\n'
-            '  "request": "command_name",\n'
-            '  "parameters": {...}\n'
-            "}\n"
-            'For get_entities with multiple areas: {"request_type": "get_entities", "parameters": {"area_ids": ["area1", "area2"]}}\n'
-            'For get_entities with single area: {"request_type": "get_entities", "parameters": {"area_id": "single_area"}}\n\n'
-            "For service calls, use this exact JSON format:\n"
-            "{\n"
-            '  "request_type": "call_service",\n'
-            '  "domain": "light",\n'
-            '  "service": "turn_on",\n'
-            '  "target": {"entity_id": ["entity1", "entity2"]},\n'
-            '  "service_data": {"brightness": 255}\n'
-            "}\n\n"
-            "For answering questions (NOT creating dashboards/automations):\n"
-            "{\n"
-            '  "request_type": "final_response",\n'
-            '  "response": "your answer to the user"\n'
-            "}\n\n"
-            "IMPORTANT: Use 'dashboard_suggestion' when creating dashboards, NOT 'final_response'!\n\n"
-            "CRITICAL FORMATTING RULES:\n"
-            "- You must ALWAYS respond with ONLY a valid JSON object\n"
-            "- DO NOT include any text before the JSON\n"
-            "- DO NOT include any text after the JSON\n"
-            "- DO NOT include explanations or descriptions outside the JSON\n"
-            "- Your entire response must be parseable as JSON\n"
-            "- Use the 'message' field inside the JSON for user-facing text\n"
-            "- NEVER mix regular text with JSON in your response\n\n"
-            "WRONG: 'I'll create this for you. {\"request_type\": ...}'\n"
-            'CORRECT: \'{"request_type": "dashboard_suggestion", "message": "I\'ll create this for you.", ...}\''
+            "You are a helpful AI assistant integrated with Home Assistant.\n"
+            "You have access to a set of capability-rich tools via the Model Context Protocol (MCP).\n"
+            "Use these tools to discover entities, check their states, and perform actions.\n\n"
+            "CORE CAPABILITIES:\n"
+            "- 'discover_entities': Find entities by name, domain, area, device_class, or current state (e.g., state='on').\n"
+            "- 'get_entity_details': Get the full status and attributes for specific entity IDs.\n"
+            "- 'perform_action': Control devices (lights, switches, etc.) by calling Home Assistant services.\n"
+            "- 'list_areas' / 'list_domains': Get an overview of how the home is organized.\n"
+            "- 'get_index': Get a high-level overview of the entire system structure.\n\n"
+            "DASHBOARD & AUTOMATION CREATION:\n"
+            "If the user asks to create an automation or dashboard, use the same tool-calling mechanism to gather data, "
+            "then respond with the appropriate JSON format in your final response.\n\n"
+            "RESPONSE FORMATS:\n"
+            "If you are not using a native tool-calling function (e.g., on a local or fallback model), "
+            "you must still provide your request as a JSON object with a 'request_type' field.\n"
+            "Example: {\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"discover_entities\", \"arguments\": {\"state\": \"on\"}}]}\n\n"
+            "Always be concise and helpful. When asked 'what is on?', first discover entities with state 'on'."
         ),
     }
 
     SYSTEM_PROMPT_LOCAL = {
         "role": "system",
         "content": (
-            "You are an AI assistant integrated with Home Assistant.\n"
-            "You can request specific data by using only these commands:\n"
-            "- get_entity_state(entity_id): Get state of a specific entity\n"
-            "- get_entities_by_domain(domain): Get all entities in a domain\n"
-            "- get_entities_by_device_class(device_class, domain?): Get entities with specific device_class (e.g., 'temperature', 'humidity', 'motion')\n"
-            "- get_climate_related_entities(): Get all climate-related entities (climate.* entities + temperature/humidity sensors)\n"
-            "- get_entities_by_area(area_id): Get all entities in a specific area\n"
-            "- get_entities(area_id or area_ids): Get entities by area(s) - supports single area_id or list of area_ids\n"
-            "  Use as: get_entities(area_ids=['area1', 'area2']) for multiple areas or get_entities(area_id='single_area')\n"
-            "- get_calendar_events(entity_id?): Get calendar events\n"
-            "- get_automations(): Get all automations\n"
-            "- get_weather_data(): Get current weather and forecast data\n"
-            "- get_entity_registry(): Get entity registry entries (now includes device_class, state_class, unit_of_measurement)\n"
-            "- get_device_registry(): Get device registry entries\n"
-            "- get_area_registry(): Get room/area information\n"
-            "- get_history(entity_id, hours): Get historical state changes\n"
-            "- get_person_data(): Get person tracking information\n"
-            "- get_statistics(entity_id): Get sensor statistics\n"
-            "- get_scenes(): Get scene configurations\n"
-            "- get_dashboards(): Get list of all dashboards\n"
-            "- get_dashboard_config(dashboard_url): Get configuration of a specific dashboard\n"
-            "- set_entity_state(entity_id, state, attributes?): Set state of an entity (e.g., turn on/off lights, open/close covers)\n"
-            "- call_service(domain, service, target?, service_data?): Call any Home Assistant service directly\n"
-            "- create_automation(automation): Create a new automation with the provided configuration\n"
-            "- create_dashboard(dashboard_config): Create a new dashboard with the provided configuration\n"
-            "- update_dashboard(dashboard_url, dashboard_config): Update an existing dashboard configuration\n\n"
-            "IMPORTANT DEVICE_CLASS GUIDANCE:\n"
-            "- Many sensors have a 'device_class' attribute (temperature, humidity, motion, etc.)\n"
-            "- Use get_climate_related_entities() for climate dashboards (includes climate.* entities and temperature/humidity sensors)\n"
-            "- Use get_entities_by_device_class(device_class) to filter by device_class (e.g., 'temperature', 'humidity', 'motion')\n"
-            "- For climate dashboards, use history-graph and gauge cards for temperature/humidity sensors\n\n"
-            "DASHBOARD CREATION:\n"
-            "When a user asks to create a dashboard:\n"
-            "1. Gather entities using get_climate_related_entities() or other get_* commands\n"
-            "2. Respond with JSON using request_type: 'dashboard_suggestion' (NEVER use 'final_response'!)\n"
-            "3. Use Lovelace JSON format (NOT YAML!)\n"
-            "4. Example response structure:\n"
-            '{"request_type": "dashboard_suggestion", "message": "Dashboard created", "dashboard": {"title": "...", "views": [...]}}\n'
-            "5. Do NOT include YAML, markdown, or code blocks - only pure JSON\n\n"
-            "IMPORTANT AREA/FLOOR GUIDANCE:\n"
-            "- When users ask for entities from a specific floor, use get_area_registry() first\n"
-            "- Areas have both 'area_id' and 'floor_id' - these are different concepts\n"
-            "- Filter areas by their floor_id to find all areas on a specific floor\n"
-            "- Use get_entities() with area_ids parameter to get entities from multiple areas efficiently\n"
-            "- Example: get_entities(area_ids=['area1', 'area2', 'area3']) for multiple areas at once\n"
-            "- This is more efficient than calling get_entities_by_area() multiple times\n\n"
-            "AUTOMATION CREATION:\n"
-            "When creating automations, request entities first to know the entity IDs.\n"
-            "For days, use: ['fri', 'mon', 'sat', 'sun', 'thu', 'tue', 'wed']\n\n"
-            "RESPONSE FORMATS - You must ALWAYS respond with valid JSON:\n\n"
-            "For automations:\n"
-            "{\n"
-            '  "request_type": "automation_suggestion",\n'
-            '  "message": "I\'ve created an automation that might help you. Would you like me to create it?",\n'
-            '  "automation": {\n'
-            '    "alias": "Name of the automation",\n'
-            '    "description": "Description of what the automation does",\n'
-            '    "trigger": [...],  // Array of trigger conditions\n'
-            '    "condition": [...], // Optional array of conditions\n'
-            '    "action": [...]     // Array of actions to perform\n'
-            "  }\n"
-            "}\n\n"
-            "For dashboards (WHEN USER ASKS TO CREATE A DASHBOARD):\n"
-            "{\n"
-            '  "request_type": "dashboard_suggestion",\n'
-            '  "message": "Description of the dashboard you created",\n'
-            '  "dashboard": {\n'
-            '    "title": "Dashboard Title",\n'
-            '    "url_path": "url-path",\n'
-            '    "icon": "mdi:icon-name",\n'
-            '    "show_in_sidebar": true,\n'
-            '    "views": [{\n'
-            '      "title": "View Title",\n'
-            '      "cards": [...]\n'
-            "    }]\n"
-            "  }\n"
-            "}\n\n"
-            "For data requests, use this exact JSON format:\n"
-            "{\n"
-            '  "request_type": "data_request",\n'
-            '  "request": "command_name",\n'
-            '  "parameters": {...}\n'
-            "}\n"
-            'For get_entities with multiple areas: {"request_type": "get_entities", "parameters": {"area_ids": ["area1", "area2"]}}\n'
-            'For get_entities with single area: {"request_type": "get_entities", "parameters": {"area_id": "single_area"}}\n\n'
-            "For service calls, use this exact JSON format:\n"
-            "{\n"
-            '  "request_type": "call_service",\n'
-            '  "domain": "light",\n'
-            '  "service": "turn_on",\n'
-            '  "target": {"entity_id": ["entity1", "entity2"]},\n'
-            '  "service_data": {"brightness": 255}\n'
-            "}\n\n"
-            "For answering questions (NOT creating dashboards/automations):\n"
-            "{\n"
-            '  "request_type": "final_response",\n'
-            '  "response": "your answer to the user"\n'
-            "}\n\n"
-            "IMPORTANT: Use 'dashboard_suggestion' when creating dashboards, NOT 'final_response'!\n\n"
-            "CRITICAL FORMATTING RULES:\n"
-            "- You must ALWAYS respond with ONLY a valid JSON object\n"
-            "- DO NOT include any text before the JSON\n"
-            "- DO NOT include any text after the JSON\n"
-            "- DO NOT include explanations or descriptions outside the JSON\n"
-            "- Your entire response must be parseable as JSON\n"
-            "- Use the 'message' field inside the JSON for user-facing text\n"
-            "- NEVER mix regular text with JSON in your response\n\n"
-            "WRONG: 'I'll create this for you. {\"request_type\": ...}'\n"
-            'CORRECT: \'{"request_type": "dashboard_suggestion", "message": "I\'ll create this for you.", ...}\''
+            "You are a helpful AI assistant integrated with Home Assistant.\n"
+            "You must use the provided tools to interact with the environment.\n"
+            "If you cannot call tools directly, you MUST respond with a JSON object like:\n"
+            "{\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {\"arg1\": \"value1\"}}]}\n\n"
+            "AVAILABLE TOOLS:\n"
+            "- 'discover_entities(state, area, domain, device_class)': Search for devices.\n"
+            "- 'perform_action(domain, action, target, data)': Control devices.\n"
+            "- 'get_entity_details(entity_ids)': Get status of specific devices.\n"
+            "- 'get_index()': Get system overview."
         ),
     }
 
@@ -3071,6 +2879,14 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                 tool_id = tc.get("id")
                                 
                                 _LOGGER.debug(f"Executing MCP tool {tool_name} with args {arguments}")
+                                
+                                # Fire HA event for UI feedback
+                                self.hass.bus.async_fire("ai_agent_ha_tool_call", {
+                                    "tool": tool_name,
+                                    "arguments": arguments,
+                                    "id": tool_id
+                                })
+                                
                                 try:
                                     if mcp_server and hasattr(mcp_server, "mcp_server"):
                                         # Use the SDK's call_tool logic

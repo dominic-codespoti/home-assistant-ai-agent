@@ -25,16 +25,13 @@ class GeminiClient(BaseAIClient):
     in agent.py handles MCP tool execution and conversation looping.
     """
 
-    def __init__(self, token, model="gemini-2.0-flash"):
+    def __init__(self, token, model="gemini-2.5-flash"):
         self.token = token.strip() if token else token
         self.model = model
         self.client = None
         if self.token:
-            # v1alpha enables preview features (function calling enhancements, etc.)
-            # Per docs: https://googleapis.github.io/python-genai/#api-selection
             self.client = genai.Client(
                 api_key=self.token,
-                http_options=types.HttpOptions(api_version="v1alpha"),
             )
 
     async def get_response(self, messages, **kwargs):
@@ -178,7 +175,12 @@ class GeminiClient(BaseAIClient):
                     }
                 )
             # Per docs: response.text skips thought parts automatically
-            text_content = response.text or ""
+            text_content = ""
+            try:
+                text_content = response.text or ""
+            except (AttributeError, ValueError):
+                pass
+
             return json.dumps(
                 {
                     "request_type": "_mcp_tool_calls",

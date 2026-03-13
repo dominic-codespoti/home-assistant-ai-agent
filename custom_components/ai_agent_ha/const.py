@@ -39,6 +39,7 @@ CONF_MCP_PORT = "mcp_port"
 CONF_ALLOWED_IPS = "allowed_ips"
 CONF_SEARCH_PROVIDER = "search_provider"
 CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
+CONF_ENABLE_GAP_FILLING = "enable_gap_filling"
 CONF_LMSTUDIO_URL = "lmstudio_url"
 DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_MCP_PORT = 8124

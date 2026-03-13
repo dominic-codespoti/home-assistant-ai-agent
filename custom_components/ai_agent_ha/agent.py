@@ -1839,20 +1839,12 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                 })
                                 
                                 try:
-                                    if mcp_server and hasattr(mcp_server, "mcp_server"):
-                                        # Use the SDK's call_tool logic
-                                        result_objs = await mcp_server.mcp_server.call_tool(tool_name, arguments)
-                                        # Convert SDK content objects back to JSON-RPC-like dict for current history format
-                                        # or just stringify the contents
-                                        content_list = []
-                                        for obj in result_objs:
-                                            if hasattr(obj, "text"):
-                                                content_list.append({"type": "text", "text": obj.text})
-                                        
-                                        result = {"content": content_list}
+                                    if mcp_server:
+                                        # Use the MCPServer wrapper's tool call logic
+                                        result = await mcp_server.handle_tool_call({"name": tool_name, "arguments": arguments})
                                         result_text = json.dumps(result, default=str)
                                     else:
-                                        result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": "MCP Server (SDK) not running."}]})
+                                        result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": "MCP Server not running."}]})
                                 except Exception as e:
                                     _LOGGER.error(f"Error executing MCP tool {tool_name}: {e}")
                                     result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": str(e)}]})
@@ -2469,16 +2461,18 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
             return []
             
         try:
-            # Get tools directly from the official Server instance
-            tools = await mcp_server.mcp_server.list_tools()
+            # Get tools from the wrapper's handle_tools_list which constructs the definitions
+            res = await mcp_server.handle_tools_list()
+            tools = res.get("tools", [])
+            
             openai_tools = []
             for tool in tools:
                 openai_tools.append({
                     "type": "function",
                     "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.inputSchema
+                        "name": tool.get("name"),
+                        "description": tool.get("description"),
+                        "parameters": tool.get("inputSchema", {})
                     }
                 })
             return openai_tools

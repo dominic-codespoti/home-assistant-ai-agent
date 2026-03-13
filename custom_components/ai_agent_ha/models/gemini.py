@@ -29,21 +29,23 @@ class GeminiClient(BaseAIClient):
     def __init__(self, token, model="gemini-2.5-flash"):
         self.token = token.strip() if token else token
         self.model = model
-        self.client = None
-        if self.token:
-            self.client = genai.Client(
-                api_key=self.token,
-            )
+        self._client = None
 
     async def get_response(self, messages, **kwargs):
-        """Send messages to Gemini and return a response string.
+        """Send messages to Gemini and return a response string."""
+        if not self.token:
+            raise Exception("Missing Gemini API key")
 
-        Returns either:
-        - Plain text for final responses
-        - JSON string with request_type="_mcp_tool_calls" for function calls
-        """
-        if not self.token or not self.client:
-            raise Exception("Missing Gemini API key or client initialization failed")
+        # Lazy initialization of the client if not already done
+        if self._client is None:
+            # Running synchronous genai.Client() in a thread to avoid blocking HA event loop
+            try:
+                self._client = await asyncio.to_thread(
+                    genai.Client, api_key=self.token
+                )
+            except Exception as e:
+                _LOGGER.error("Failed to initialize Gemini client: %s", e)
+                raise Exception(f"Gemini client initialization failed: {e}")
 
         _LOGGER.debug("Gemini: request to model %s with %d messages", self.model, len(messages))
 
@@ -146,7 +148,7 @@ class GeminiClient(BaseAIClient):
 
             # Sync call executed in a separate thread
             response = await asyncio.to_thread(
-                self.client.models.generate_content,
+                self._client.models.generate_content,
                 model=self.model,
                 contents=contents,
                 config=config,

@@ -53,11 +53,20 @@ _LOGGER = logging.getLogger(__name__)
 class MCPServer:
     """MCP Server for entity discovery."""
 
-    def __init__(self, hass: HomeAssistant, port: int, entry=None) -> None:
+    def __init__(self, hass: HomeAssistant, entry: Any) -> None:
         """Initialize MCP server."""
         self.hass = hass
-        self.port = port
         self.entry = entry
+
+        # Get port from entry if available, else use default
+        from .const import CONF_MCP_PORT, DEFAULT_MCP_PORT
+        port = entry.options.get(CONF_MCP_PORT, entry.data.get(CONF_MCP_PORT, DEFAULT_MCP_PORT))
+        try:
+            self.port = int(port)
+        except (ValueError, TypeError):
+            _LOGGER.warning("Invalid MCP port '%s', using default %d", port, DEFAULT_MCP_PORT)
+            self.port = DEFAULT_MCP_PORT
+
         self.app: web.Application | None = None
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None

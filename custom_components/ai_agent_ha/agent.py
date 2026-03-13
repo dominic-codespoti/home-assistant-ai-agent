@@ -915,6 +915,9 @@ class AiAgentHaAgent:
         self, automation_config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Create a new automation with validation and sanitization."""
+        if automation_config is None:
+            return {"error": "Missing automation configuration"}
+            
         try:
             _LOGGER.debug(
                 "Creating automation with config: %s", json.dumps(automation_config)
@@ -1115,6 +1118,9 @@ class AiAgentHaAgent:
         self, dashboard_config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Create a new dashboard using Home Assistant's Lovelace WebSocket API."""
+        if dashboard_config is None:
+            return {"error": "Missing dashboard configuration"}
+            
         try:
             _LOGGER.debug(
                 "Creating dashboard with config: %s",
@@ -1440,6 +1446,9 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
         self, dashboard_url: str, dashboard_config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Update an existing dashboard using Home Assistant's Lovelace WebSocket API."""
+        if dashboard_config is None:
+            return {"error": "Missing dashboard configuration"}
+            
         try:
             _LOGGER.debug(
                 "Updating dashboard %s with config: %s",
@@ -1955,17 +1964,19 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                     parameters.get("attributes"),
                                 )
                             elif request_type == "create_automation":
-                                data = await self.create_automation(
-                                    parameters.get("automation")
-                                )
+                                # Robust extraction: try nested key first, then fall back to full parameters
+                                automation = parameters.get("automation") or parameters
+                                data = await self.create_automation(automation)
                             elif request_type == "create_dashboard":
-                                data = await self.create_dashboard(
-                                    parameters.get("dashboard_config")
-                                )
+                                # Robust extraction: try nested key first, then fall back to full parameters
+                                db_config = parameters.get("dashboard_config") or parameters
+                                data = await self.create_dashboard(db_config)
                             elif request_type == "update_dashboard":
+                                # Robust extraction: try nested key first, then fall back to full parameters
+                                db_config = parameters.get("dashboard_config") or parameters
                                 data = await self.update_dashboard(
                                     parameters.get("dashboard_url"),
-                                    parameters.get("dashboard_config"),
+                                    db_config,
                                 )
                             else:
                                 data = {

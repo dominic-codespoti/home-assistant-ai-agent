@@ -88,18 +88,28 @@ class GeminiClient(BaseAIClient):
                     contents.append(types.ModelContent(parts=parts))
 
             elif role == "tool":
-                # Per docs: role='tool' with Part.from_function_response
-                contents.append(
-                    types.Content(
-                        role="tool",
-                        parts=[
-                            types.Part.from_function_response(
-                                name=msg.get("name"),
-                                response={"result": content},
-                            )
-                        ],
+                # Per docs: role='tool' MUST contain a Part.from_function_response for 
+                # EACH Part.from_function_call in the preceding 'model' turn.
+                # If tool messages are adjacent in history, we group them.
+                if contents and contents[-1].role == "tool":
+                    contents[-1].parts.append(
+                        types.Part.from_function_response(
+                            name=msg.get("name"),
+                            response={"result": content},
+                        )
                     )
-                )
+                else:
+                    contents.append(
+                        types.Content(
+                            role="tool",
+                            parts=[
+                                types.Part.from_function_response(
+                                    name=msg.get("name"),
+                                    response={"result": content},
+                                )
+                            ],
+                        )
+                    )
 
         if not contents:
             raise Exception("No content messages to send to Gemini")

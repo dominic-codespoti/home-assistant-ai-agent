@@ -52,7 +52,12 @@ class AiAgentHaAgent:
             "If you are not using a native tool-calling function (e.g., on a local or fallback model), "
             "you must still provide your request as a JSON object with a 'request_type' field.\n"
             "Example: {\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"discover_entities\", \"arguments\": {\"state\": \"on\"}}]}\n\n"
-            "Always be concise and helpful. When asked 'what is on?', first discover entities with state 'on'."
+            "Always be concise and helpful. When asked 'what is on?', first discover entities with state 'on'.\n"
+            "STRICT RULES:\n"
+            "1. You MUST use the provided tools to gather data before providing a final answer.\n"
+            "2. If a tool call returns no results, try alternative search terms or broader domains immediately.\n"
+            "3. DO NOT explain what you are doing or what you plan to do between tool calls.\n"
+            "4. Stay in the tool-calling loop until you have successfully gathered all necessary information or exhausted all search possibilities."
         ),
     }
 

@@ -4,6 +4,7 @@ Coded strictly against https://googleapis.github.io/python-genai/
 See: Function Calling (manual), GenerateContentConfig, Content/Part types.
 """
 
+import asyncio
 import json
 import logging
 
@@ -132,7 +133,9 @@ class GeminiClient(BaseAIClient):
 
         # ── Call the API ──
         # Per docs: GenerateContentConfig holds temperature, tools, system_instruction etc.
-        # Async via client.aio.models.generate_content
+        # WORKAROUND: We use the synchronous client wrapped in asyncio.to_thread
+        # to bypass a known 'grpcio' bug on Windows that causes async calls to fail
+        # with "TypeError: Channel.getaddrinfo() takes 4 positional arguments but 5 were given".
         try:
             config = types.GenerateContentConfig(
                 temperature=0.7,
@@ -141,7 +144,9 @@ class GeminiClient(BaseAIClient):
                 system_instruction=system_instruction,
             )
 
-            response = await self.client.aio.models.generate_content(
+            # Sync call executed in a separate thread
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model,
                 contents=contents,
                 config=config,

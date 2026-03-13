@@ -1538,7 +1538,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                 },
                 "gemini": {
                     "token_key": "gemini_token",
-                    "model": models_config.get("gemini", "gemini-1.5-flash"),
+                    "model": models_config.get("gemini", "gemini-2.5-flash"),
                     "client_class": GeminiClient,
                 },
                 "openrouter": {

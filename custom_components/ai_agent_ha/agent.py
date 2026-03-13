@@ -218,6 +218,8 @@ class AiAgentHaAgent:
 
     async def get_entity_state(self, entity_id: str) -> Dict[str, Any]:
         """Get the state of a specific entity."""
+        if not entity_id:
+            return {"error": "Missing entity_id"}
         try:
             _LOGGER.debug("Requesting entity state for: %s", entity_id)
             state = self.hass.states.get(entity_id)
@@ -352,6 +354,8 @@ class AiAgentHaAgent:
 
     async def get_entities_by_domain(self, domain: str) -> List[Dict[str, Any]]:
         """Get all entities for a specific domain."""
+        if not domain:
+            return [{"error": "Missing domain"}]
         try:
             _LOGGER.debug("Requesting all entities for domain: %s", domain)
             states = [
@@ -466,6 +470,8 @@ class AiAgentHaAgent:
 
     async def get_entities_by_area(self, area_id: str) -> List[Dict[str, Any]]:
         """Get all entities for a specific area."""
+        if not area_id:
+            return [{"error": "Missing area_id"}]
         try:
             _LOGGER.debug("Requesting all entities for area: %s", area_id)
 
@@ -686,6 +692,8 @@ class AiAgentHaAgent:
 
     async def get_history(self, entity_id: str, hours: int = 24) -> List[Dict]:
         """Get historical state changes for an entity"""
+        if not entity_id:
+            return [{"error": "Missing entity_id"}]
         _LOGGER.debug("Requesting historical state changes for entity: %s", entity_id)
         try:
             from homeassistant.components.recorder.history import get_significant_states
@@ -1964,18 +1972,18 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                     parameters.get("attributes"),
                                 )
                             elif request_type == "create_automation":
-                                # Robust extraction: try nested key first, then fall back to full parameters
-                                automation = parameters.get("automation") or parameters
+                                # Robust extraction: try nested key, then parameters, then response_data itself
+                                automation = parameters.get("automation") if parameters.get("automation") else (parameters if parameters.get("alias") else {k: v for k, v in response_data.items() if k != "request_type"})
                                 data = await self.create_automation(automation)
                             elif request_type == "create_dashboard":
-                                # Robust extraction: try nested key first, then fall back to full parameters
-                                db_config = parameters.get("dashboard_config") or parameters
+                                # Robust extraction: try nested key, then parameters, then response_data itself
+                                db_config = parameters.get("dashboard_config") if parameters.get("dashboard_config") else (parameters if parameters.get("title") else {k: v for k, v in response_data.items() if k != "request_type"})
                                 data = await self.create_dashboard(db_config)
                             elif request_type == "update_dashboard":
-                                # Robust extraction: try nested key first, then fall back to full parameters
-                                db_config = parameters.get("dashboard_config") or parameters
+                                # Robust extraction: try nested key, then parameters, then response_data itself
+                                db_config = parameters.get("dashboard_config") if parameters.get("dashboard_config") else (parameters if parameters.get("title") else {k: v for k, v in response_data.items() if k != "request_type"})
                                 data = await self.update_dashboard(
-                                    parameters.get("dashboard_url"),
+                                    parameters.get("dashboard_url") or response_data.get("dashboard_url"),
                                     db_config,
                                 )
                             else:
@@ -2239,6 +2247,16 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                             domain,
                                             service,
                                         )
+
+                            # Validate domain and service before calling
+                            if not domain or not service:
+                                _LOGGER.error(
+                                    "Missing domain or service in call_service request: domain=%s, service=%s",
+                                    domain, service,
+                                )
+                                return _with_debug(
+                                    {"success": False, "error": "Missing domain or service in service call request"}
+                                )
 
                             _LOGGER.debug(
                                 "Processing service call: %s.%s with target: %s and data: %s",
@@ -2582,6 +2600,8 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
         self, entity_id: str, state: str, attributes: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Set the state of an entity."""
+        if not entity_id:
+            return {"error": "Missing entity_id"}
         try:
             _LOGGER.debug(
                 "Setting state for entity %s to %s with attributes: %s",

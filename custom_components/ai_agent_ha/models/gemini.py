@@ -181,12 +181,15 @@ class GeminiClient(BaseAIClient):
                         "arguments": dict(fc.args) if fc.args else {},
                     }
                 )
-            # Per docs: response.text skips thought parts automatically
+            # Check if there's actually any text to avoid SDK warnings
             text_content = ""
-            try:
-                text_content = response.text or ""
-            except (AttributeError, ValueError):
-                pass
+            if response.candidates:
+                part = response.candidates[0].content.parts[0]
+                if hasattr(part, "text") and part.text:
+                    try:
+                        text_content = response.text or ""
+                    except (AttributeError, ValueError):
+                        pass
 
             return json.dumps(
                 {
@@ -213,14 +216,15 @@ class GeminiClient(BaseAIClient):
                 )
 
         # 3) Extract text — SDK's .text handles thinking models automatically
-        # Per docs: thought parts are stripped server-side when include_thoughts
-        # is not set, so response.text just works.
-        try:
-            text = response.text
-            if text and text.strip():
-                return text
-        except (AttributeError, ValueError):
-            pass
+        if response.candidates:
+            part = response.candidates[0].content.parts[0]
+            if hasattr(part, "text") and part.text:
+                try:
+                    text = response.text
+                    if text and text.strip():
+                        return text
+                except (AttributeError, ValueError):
+                    pass
 
         # 4) Nothing usable
         _LOGGER.warning("Gemini: empty response (no text or tool calls)")

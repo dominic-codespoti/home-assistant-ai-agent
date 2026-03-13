@@ -193,13 +193,15 @@ class GeminiClient(BaseAIClient):
                 )
             # Check if there's actually any text to avoid SDK warnings
             text_content = ""
-            if response.candidates:
-                part = response.candidates[0].content.parts[0]
-                if hasattr(part, "text") and part.text:
-                    try:
-                        text_content = response.text or ""
-                    except (AttributeError, ValueError):
-                        pass
+            if response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                if candidate.content and candidate.content.parts and len(candidate.content.parts) > 0:
+                    part = candidate.content.parts[0]
+                    if hasattr(part, "text") and part.text:
+                        try:
+                            text_content = response.text or ""
+                        except (AttributeError, ValueError):
+                            pass
 
             return json.dumps(
                 {
@@ -210,7 +212,7 @@ class GeminiClient(BaseAIClient):
             )
 
         # 2) Check for safety blocks via finish_reason
-        if response.candidates:
+        if response.candidates and len(response.candidates) > 0:
             candidate = response.candidates[0]
             fr = getattr(candidate, "finish_reason", None)
             if fr and "SAFETY" in str(fr).upper():
@@ -226,15 +228,17 @@ class GeminiClient(BaseAIClient):
                 )
 
         # 3) Extract text — SDK's .text handles thinking models automatically
-        if response.candidates:
-            part = response.candidates[0].content.parts[0]
-            if hasattr(part, "text") and part.text:
-                try:
-                    text = response.text
-                    if text and text.strip():
-                        return text
-                except (AttributeError, ValueError):
-                    pass
+        if response.candidates and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+            if candidate.content and candidate.content.parts and len(candidate.content.parts) > 0:
+                part = candidate.content.parts[0]
+                if hasattr(part, "text") and part.text:
+                    try:
+                        text = response.text
+                        if text and text.strip():
+                            return text
+                    except (AttributeError, ValueError):
+                        pass
 
         # 4) Nothing usable
         _LOGGER.warning("Gemini: empty response (no text or tool calls)")

@@ -1,8 +1,4 @@
-"""Google Gemini API client using the google-genai SDK.
-
-Coded strictly against https://googleapis.github.io/python-genai/
-See: Function Calling (manual), GenerateContentConfig, Content/Part types.
-"""
+"""Google Gemini API client using the google-genai SDK."""
 
 import asyncio
 import json
@@ -15,139 +11,123 @@ from .base import BaseAIClient
 
 _LOGGER = logging.getLogger(__name__)
 
-class GeminiClient(BaseAIClient):
-    """Gemini client using the official google-genai SDK.
+DEFAULT_TIMEOUT_SECONDS = 45
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
-    The agent orchestrator in agent.py handles structured JSON request/response
-    looping for Home Assistant interactions.
-    """
+
+class GeminiClient(BaseAIClient):
+    """Gemini client using the official google-genai SDK."""
 
     def __init__(self, token, model="gemini-2.5-flash"):
         self.token = token.strip() if token else token
         self.model = model
         self._client = None
+        self._timeout_seconds = DEFAULT_TIMEOUT_SECONDS
+        self._max_output_tokens = DEFAULT_MAX_OUTPUT_TOKENS
 
     async def get_response(self, messages, **kwargs):
         """Send messages to Gemini and return a response string."""
         if not self.token:
             raise Exception("Missing Gemini API key")
 
-        # Lazy initialization of the client if not already done
+        # Lazy initialization keeps startup cheap and avoids unnecessary SDK work.
         if self._client is None:
-            # Running synchronous genai.Client() in a thread to avoid blocking HA event loop
             try:
-                self._client = await asyncio.to_thread(
-                    genai.Client, api_key=self.token
-                )
+                self._client = await asyncio.to_thread(genai.Client, api_key=self.token)
             except Exception as e:
                 _LOGGER.error("Failed to initialize Gemini client: %s", e)
                 raise Exception(f"Gemini client initialization failed: {e}")
 
-        _LOGGER.debug("Gemini: request to model %s with %d messages", self.model, len(messages))
+        timeout_seconds = int(kwargs.get("timeout_seconds", self._timeout_seconds))
+        max_output_tokens = int(kwargs.get("max_output_tokens", self._max_output_tokens))
+        max_output_tokens = max(256, min(max_output_tokens, 8192))
 
-        # ── Build contents from conversation history ──
-        # Per docs: list[types.Content] is the canonical format.
-        # Roles: 'user' for user messages, 'model' for assistant, 'tool' for function responses.
+        _LOGGER.debug(
+            "Gemini: request to model %s with %d messages (timeout=%ss, max_output_tokens=%d)",
+            self.model,
+            len(messages),
+            timeout_seconds,
+            max_output_tokens,
+        )
+
         system_instruction = None
         contents: list[types.Content] = []
 
+        # Keep payload lean by skipping empty turns and mapping only required roles.
         for msg in messages:
             role = msg.get("role")
-            content = msg.get("content", "")
+            content = (msg.get("content") or "").strip()
 
             if role == "system":
-                # Per docs: system_instruction goes in GenerateContentConfig, not contents
-                system_instruction = content
-
-            elif role == "user":
-                contents.append(
-                    types.UserContent(
-                        parts=[types.Part.from_text(text=content or "")]
-                    )
-                )
-
-            elif role == "assistant":
-                # Per docs: assistant maps to role='model' (types.ModelContent)
-                parts = []
                 if content:
-                    parts.append(types.Part.from_text(text=content))
-                # Re-attach function call parts from previous turns
-                if "tool_calls" in msg:
-                    for tc in msg["tool_calls"]:
-                        parts.append(
-                            types.Part.from_function_call(
-                                name=tc["name"],
-                                args=tc["arguments"],
-                            )
-                        )
-                if parts:
-                    contents.append(types.ModelContent(parts=parts))
-
-            elif role == "tool":
-                # Per docs: role='tool' MUST contain a Part.from_function_response for 
-                # EACH Part.from_function_call in the preceding 'model' turn.
-                # If tool messages are adjacent in history, we group them.
-                if contents and contents[-1].role == "tool":
-                    contents[-1].parts.append(
-                        types.Part.from_function_response(
-                            name=msg.get("name"),
-                            response={"result": content},
-                        )
-                    )
-                else:
+                    system_instruction = content
+            elif role == "user":
+                if content:
                     contents.append(
-                        types.Content(
-                            role="tool",
+                        types.UserContent(parts=[types.Part.from_text(text=content)])
+                    )
+            elif role == "assistant":
+                if content:
+                    contents.append(
+                        types.ModelContent(parts=[types.Part.from_text(text=content)])
+                    )
+            elif role == "tool":
+                # Preserve legacy tool context as plain text without re-enabling
+                # function-calling transport overhead.
+                if content:
+                    contents.append(
+                        types.UserContent(
                             parts=[
-                                types.Part.from_function_response(
-                                    name=msg.get("name"),
-                                    response={"result": content},
-                                )
-                            ],
+                                types.Part.from_text(text=f"Tool result: {content}")
+                            ]
                         )
                     )
 
         if not contents:
             raise Exception("No content messages to send to Gemini")
 
-        # ── Call the API ──
-        # Per docs: GenerateContentConfig holds temperature, tools, system_instruction etc.
-        # WORKAROUND: We use the synchronous client wrapped in asyncio.to_thread
-        # to bypass a known 'grpcio' bug on Windows that causes async calls to fail
-        # with "TypeError: Channel.getaddrinfo() takes 4 positional arguments but 5 were given".
         try:
             config = types.GenerateContentConfig(
                 temperature=0.7,
                 top_p=0.9,
+                max_output_tokens=max_output_tokens,
                 system_instruction=system_instruction,
             )
 
-            # Sync call executed in a separate thread
-            response = await asyncio.to_thread(
-                self._client.models.generate_content,
-                model=self.model,
-                contents=contents,
-                config=config,
+            # Sync SDK call is wrapped to keep HA's event loop non-blocking.
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._client.models.generate_content,
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                ),
+                timeout=timeout_seconds,
             )
+        except asyncio.TimeoutError as e:
+            _LOGGER.error("Gemini request timed out after %ss", timeout_seconds)
+            raise Exception(f"Gemini request timed out after {timeout_seconds}s") from e
         except errors.APIError as e:
-            _LOGGER.error("Gemini API error (code=%s): %s", e.code, e.message)
+            _LOGGER.error(
+                "Gemini API error (code=%s): %s", getattr(e, "code", "unknown"), e
+            )
             raise
         except Exception as e:
             _LOGGER.error("Gemini SDK error: %s", e, exc_info=True)
             raise
 
-        # ── Process response ──
         _LOGGER.debug(
             "Gemini: %d candidate(s)",
             len(response.candidates) if response.candidates else 0,
         )
 
-        # 1) Check for safety blocks via finish_reason
         if response.candidates and len(response.candidates) > 0:
             candidate = response.candidates[0]
-            fr = getattr(candidate, "finish_reason", None)
-            if fr and "SAFETY" in str(fr).upper():
-                _LOGGER.warning("Gemini: response blocked by safety filter (%s)", fr)
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason and "SAFETY" in str(finish_reason).upper():
+                _LOGGER.warning(
+                    "Gemini: response blocked by safety filter (%s)", finish_reason
+                )
                 return json.dumps(
                     {
                         "request_type": "final_response",
@@ -158,21 +138,11 @@ class GeminiClient(BaseAIClient):
                     }
                 )
 
-        # 2) Extract text — SDK's .text handles thinking models automatically
-        if response.candidates and len(response.candidates) > 0:
-            candidate = response.candidates[0]
-            if candidate.content and candidate.content.parts and len(candidate.content.parts) > 0:
-                part = candidate.content.parts[0]
-                if hasattr(part, "text") and part.text:
-                    try:
-                        text = response.text
-                        if text and text.strip():
-                            return text
-                    except (AttributeError, ValueError):
-                        pass
+        text = self._extract_response_text(response)
+        if text:
+            return text
 
-        # 3) Nothing usable
-        _LOGGER.warning("Gemini: empty response (no text or tool calls)")
+        _LOGGER.warning("Gemini: empty response (no usable text)")
         return json.dumps(
             {
                 "request_type": "final_response",
@@ -182,3 +152,31 @@ class GeminiClient(BaseAIClient):
                 ),
             }
         )
+
+    @staticmethod
+    def _extract_response_text(response: types.GenerateContentResponse) -> str | None:
+        """Extract text from Gemini response candidates safely."""
+        try:
+            text = response.text
+            if text and text.strip():
+                return text.strip()
+        except (AttributeError, ValueError):
+            pass
+
+        if not response.candidates:
+            return None
+
+        candidate = response.candidates[0]
+        if not candidate.content or not candidate.content.parts:
+            return None
+
+        chunks: list[str] = []
+        for part in candidate.content.parts:
+            part_text = getattr(part, "text", None)
+            if part_text and part_text.strip():
+                chunks.append(part_text.strip())
+
+        if not chunks:
+            return None
+
+        return "\n".join(chunks)

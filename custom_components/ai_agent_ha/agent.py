@@ -42,6 +42,9 @@ class AiAgentHaAgent:
             "Request Home Assistant data using either:\n"
             "- {\"request_type\": \"data_request\", \"request\": \"<request_name>\", \"parameters\": {...}}\n"
             "- or a direct request type, e.g. {\"request_type\": \"get_entities_by_domain\", \"parameters\": {\"domain\": \"light\"}}\n\n"
+            "For indoor/outdoor temperature requests, combine:\n"
+            "- {\"request_type\": \"get_climate_related_entities\", \"parameters\": {}}\n"
+            "- {\"request_type\": \"get_weather_data\", \"parameters\": {}}\n\n"
             "SERVICE EXECUTION:\n"
             "Use:\n"
             "{\"request_type\": \"call_service\", \"domain\": \"light\", \"service\": \"turn_on\", \"target\": {\"entity_id\": \"light.kitchen\"}, \"service_data\": {}}\n\n"
@@ -502,9 +505,17 @@ class AiAgentHaAgent:
             _LOGGER.exception("Error getting entities by area: %s", str(e))
             return [{"error": f"Error getting entities for area {area_id}: {str(e)}"}]
 
-    async def get_entities(self, area_id=None, area_ids=None) -> List[Dict[str, Any]]:
+    async def get_entities(
+        self, area_id=None, area_ids=None, limit: int = 100
+    ) -> List[Dict[str, Any]]:
         """Get entities by area(s) - flexible method that supports single area or multiple areas."""
         try:
+            try:
+                requested_limit = int(limit) if limit is not None else 100
+            except (TypeError, ValueError):
+                requested_limit = 100
+            safe_limit = max(1, min(requested_limit, 500))
+
             # Handle different parameter formats
             areas_to_process = []
 
@@ -521,7 +532,15 @@ class AiAgentHaAgent:
                 else:
                     areas_to_process = [area_id]
             else:
-                return [{"error": "No area_id or area_ids provided"}]
+                _LOGGER.debug(
+                    "No area filter provided to get_entities; returning up to %d entities from full state set",
+                    safe_limit,
+                )
+                states = self.hass.states.async_all()
+                return [
+                    await self.get_entity_state(state.entity_id)
+                    for state in states[:safe_limit]
+                ]
 
             _LOGGER.debug("Requesting entities for areas: %s", areas_to_process)
 
@@ -1861,6 +1880,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                 data = await self.get_entities(
                                     area_id=parameters.get("area_id"),
                                     area_ids=parameters.get("area_ids"),
+                                    limit=parameters.get("limit", 100),
                                 )
                             elif request_type == "get_entities_by_device_class":
                                 data = await self.get_entities_by_device_class(
@@ -2063,6 +2083,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                 data = await self.get_entities(
                                     area_id=parameters.get("area_id"),
                                     area_ids=parameters.get("area_ids"),
+                                    limit=parameters.get("limit", 100),
                                 )
                             else:  # get_entities_by_area
                                 data = await self.get_entities_by_area(
@@ -2115,6 +2136,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                                         entities_data = await self.get_entities(
                                             area_id=nested_parameters.get("area_id"),
                                             area_ids=nested_parameters.get("area_ids"),
+                                            limit=nested_parameters.get("limit", 100),
                                         )
                                     elif nested_request_type == "get_entities_by_area":
                                         entities_data = await self.get_entities_by_area(

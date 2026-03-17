@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed climate dashboard creation for users with only temperature/humidity sensors (no climate.* entities)
   - Added `get_entities_by_device_class()` helper function
   - Added `get_climate_related_entities()` to combine climate.* entities with temperature/humidity sensors
+- Fixed generic entity query fallback when no `area_id`/`area_ids` is provided:
+  - `get_entities()` now returns a bounded full-state fallback instead of hard erroring
+  - Prevents simple questions (for example indoor/outdoor temperature prompts) from failing with `"No area_id or area_ids provided"`
 
 ### Added
 - `get_entities_by_device_class(device_class, domain)` function to filter entities by device_class attribute

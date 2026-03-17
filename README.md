@@ -19,7 +19,7 @@ Click the button above to install AI Agent HA directly through HACS, or see the 
 - 🔒 **Secure**: API keys stored securely in Home Assistant
 - 🎨 **Beautiful UI**: Clean, modern chat interface
 - 🔄 **Real-time**: Instant responses and updates
-- 🔌 **MCP Server Capabilities**: Exposes Home Assistant to external MCP clients (Claude Desktop, cursor, etc) for discovering and interacting with Home Assistant entities.
+- 🔌 **Official MCP Integration Compatible**: Use Home Assistant's built-in `mcp_server` integration for external MCP clients (Claude Desktop, Cursor, etc.).
 
 ## 📸 Screenshots
 
@@ -254,10 +254,12 @@ The AI can access comprehensive Home Assistant data:
 - Statistics and analytics
 
 ### Model Context Protocol (MCP) Server
-The AI Agent HA integration bundles an **MCP Server** out-of-the-box. This powerful feature allows external AI clients supporting the Model Context Protocol (such as Claude Desktop, Cursor, or LM Studio) to directly discover Home Assistant entities, read their states, and perform actions without any extra configuration other than pointing the client to the exposed Home Assistant MCP web socket.
-- Default Port: `8124`
-- Connect via: `ws://<your-ha-ip>:8124/ws`
-- Features: Entity Discovery, History Retrieval, Automation & Script Execution, Web Search (via Brave).
+AI Agent HA no longer bundles a custom MCP server implementation.
+
+For MCP client access, use Home Assistant's official **Model Context Protocol Server** integration (`mcp_server`):
+- Add `Model Context Protocol Server` in Home Assistant (**Settings → Devices & services → Add Integration**)
+- Use endpoint: `https://<your_home_assistant_url>/api/mcp`
+- Configure OAuth or long-lived access tokens per Home Assistant docs: https://www.home-assistant.io/integrations/mcp_server/
 
 ## 🛠️ Development
 
@@ -360,7 +362,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Home Assistant community for the excellent platform
 - All AI providers for their powerful APIs
 - Special thanks to @RmG152 for their valuable help with development
-- Huge thanks to Mike Nott and the **[mcp-assist](https://github.com/mike-nott/mcp-assist)** project, from which the core MCP server capabilities were adopted.
 - Contributors and testers who help improve this integration
 
 ---

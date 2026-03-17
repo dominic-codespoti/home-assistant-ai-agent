@@ -19,7 +19,6 @@
     "issue_tracker": "https://github.com/dominic-codespoti/home-assistant-ai-agent/issues",
     "requirements": [
         "aiohttp>=3.8.0",
-        "mcp>=1.2.0",
         "google-genai"
     ],
     "version": "1.27"

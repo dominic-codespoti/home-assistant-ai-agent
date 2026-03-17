@@ -37,27 +37,21 @@ class AiAgentHaAgent:
         "role": "system",
         "content": (
             "You are a helpful AI assistant integrated with Home Assistant.\n"
-            "You have access to a set of capability-rich tools via the Model Context Protocol (MCP).\n"
-            "Use these tools to discover entities, check their states, and perform actions.\n\n"
-            "CORE CAPABILITIES:\n"
-            "- 'discover_entities': Find entities by name, domain, area, device_class, or current state (e.g., state='on').\n"
-            "- 'get_entity_details': Get the full status and attributes for specific entity IDs.\n"
-            "- 'perform_action': Control devices (lights, switches, etc.) by calling Home Assistant services.\n"
-            "- 'list_areas' / 'list_domains': Get an overview of how the home is organized.\n"
-            "- 'get_index': Get a high-level overview of the entire system structure.\n\n"
-            "DASHBOARD & AUTOMATION CREATION:\n"
-            "If the user asks to create an automation or dashboard, use the same tool-calling mechanism to gather data, "
-            "then respond with the appropriate JSON format in your final response.\n\n"
-            "RESPONSE FORMATS:\n"
-            "If you are not using a native tool-calling function (e.g., on a local or fallback model), "
-            "you must still provide your request as a JSON object with a 'request_type' field.\n"
-            "Example: {\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"discover_entities\", \"arguments\": {\"state\": \"on\"}}]}\n\n"
-            "Always be concise and helpful. When asked 'what is on?', first discover entities with state 'on'.\n"
+            "You must respond with JSON only.\n\n"
+            "DATA ACCESS:\n"
+            "Request Home Assistant data using either:\n"
+            "- {\"request_type\": \"data_request\", \"request\": \"<request_name>\", \"parameters\": {...}}\n"
+            "- or a direct request type, e.g. {\"request_type\": \"get_entities_by_domain\", \"parameters\": {\"domain\": \"light\"}}\n\n"
+            "SERVICE EXECUTION:\n"
+            "Use:\n"
+            "{\"request_type\": \"call_service\", \"domain\": \"light\", \"service\": \"turn_on\", \"target\": {\"entity_id\": \"light.kitchen\"}, \"service_data\": {}}\n\n"
+            "FINAL ANSWER:\n"
+            "{\"request_type\": \"final_response\", \"response\": \"...\"}\n\n"
             "STRICT RULES:\n"
-            "1. You MUST use the provided tools to gather data before providing a final answer.\n"
-            "2. If a tool call returns no results, try alternative search terms or broader domains immediately.\n"
-            "3. DO NOT explain what you are doing or what you plan to do between tool calls.\n"
-            "4. Stay in the tool-calling loop until you have successfully gathered all necessary information or exhausted all search possibilities."
+            "1. Gather required data before returning final_response.\n"
+            "2. If a request returns no results, immediately broaden or adjust your query.\n"
+            "3. Do not emit text outside JSON.\n"
+            "4. Never use MCP tool call envelopes such as _mcp_tool_calls."
         ),
     }
 
@@ -65,14 +59,10 @@ class AiAgentHaAgent:
         "role": "system",
         "content": (
             "You are a helpful AI assistant integrated with Home Assistant.\n"
-            "You must use the provided tools to interact with the environment.\n"
-            "If you cannot call tools directly, you MUST respond with a JSON object like:\n"
-            "{\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {\"arg1\": \"value1\"}}]}\n\n"
-            "AVAILABLE TOOLS:\n"
-            "- 'discover_entities(state, area, domain, device_class)': Search for devices.\n"
-            "- 'perform_action(domain, action, target, data)': Control devices.\n"
-            "- 'get_entity_details(entity_ids)': Get status of specific devices.\n"
-            "- 'get_index()': Get system overview."
+            "You must respond with JSON only.\n"
+            "Use data_request and call_service objects to gather data and control Home Assistant.\n"
+            "Return final output as {\"request_type\": \"final_response\", \"response\": \"...\"}.\n"
+            "Never use _mcp_tool_calls."
         ),
     }
 
@@ -1695,11 +1685,6 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
             max_iterations = 5  # Prevent infinite loops
             iteration = 0
 
-            # Fetch MCP tools once
-            available_tools = await self._get_mcp_tools()
-            if available_tools:
-                _LOGGER.debug(f"Retrieved {len(available_tools)} MCP tools for prompt injection.")
-
             while iteration < max_iterations:
                 iteration += 1
                 _LOGGER.debug(f"Processing iteration {iteration} of {max_iterations}")
@@ -1707,7 +1692,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                 try:
                     # Get AI response
                     _LOGGER.debug("Requesting response from AI provider")
-                    response = await self._get_ai_response(tools=available_tools)
+                    response = await self._get_ai_response()
                     _LOGGER.debug("Received response from AI provider: %s", response)
 
                     try:
@@ -1832,55 +1817,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                             "update_dashboard",
                         ]
 
-                        if response_data.get("request_type") == "_mcp_tool_calls":
-                            tool_calls = response_data.get("tool_calls", [])
-                            text_content = response_data.get("content", "")
-                            
-                            # Log assistant's message to conversation
-                            assistant_msg = {
-                                "role": "assistant",
-                                "content": text_content,
-                                "tool_calls": tool_calls
-                            }
-                            self.conversation_history.append(assistant_msg)
-                            
-                            # Execute each tool
-                            mcp_server = self.hass.data[DOMAIN].get("mcp_server")
-                            for tc in tool_calls:
-                                tool_name = tc.get("name")
-                                arguments = tc.get("arguments", {})
-                                tool_id = tc.get("id")
-                                
-                                _LOGGER.debug(f"Executing MCP tool {tool_name} with args {arguments}")
-                                
-                                # Fire HA event for UI feedback
-                                self.hass.bus.async_fire("ai_agent_ha_tool_call", {
-                                    "tool": tool_name,
-                                    "arguments": arguments,
-                                    "id": tool_id
-                                })
-                                
-                                try:
-                                    if mcp_server:
-                                        # Use the MCPServer wrapper's tool call logic
-                                        result = await mcp_server.handle_tool_call({"name": tool_name, "arguments": arguments})
-                                        result_text = json.dumps(result, default=str)
-                                    else:
-                                        result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": "MCP Server not running."}]})
-                                except Exception as e:
-                                    _LOGGER.error(f"Error executing MCP tool {tool_name}: {e}")
-                                    result_text = json.dumps({"isError": True, "content": [{"type": "text", "text": str(e)}]})
-                                
-                                self.conversation_history.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_id,
-                                    "name": tool_name,
-                                    "content": result_text
-                                })
-                                
-                            continue
-
-                        elif (
+                        if (
                             response_data.get("request_type") == "data_request"
                             or response_data.get("request_type") in data_request_types
                         ):
@@ -2488,33 +2425,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
             "conversation": history_tail,
         }
 
-    async def _get_mcp_tools(self) -> List[Dict[str, Any]]:
-        """Fetch available MCP tools from the local server instance."""
-        mcp_server = self.hass.data[DOMAIN].get("mcp_server")
-        if not mcp_server or not hasattr(mcp_server, "mcp_server"):
-            return []
-            
-        try:
-            # Get tools from the wrapper's handle_tools_list which constructs the definitions
-            res = await mcp_server.handle_tools_list()
-            tools = res.get("tools", [])
-            
-            openai_tools = []
-            for tool in tools:
-                openai_tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool.get("name"),
-                        "description": tool.get("description"),
-                        "parameters": tool.get("inputSchema", {})
-                    }
-                })
-            return openai_tools
-        except Exception as e:
-            _LOGGER.error("Error getting MCP tools from SDK: %s", str(e))
-            return []
-
-    async def _get_ai_response(self, tools: Optional[List[Dict[str, Any]]] = None) -> str:
+    async def _get_ai_response(self) -> str:
         """Get response from the selected AI provider with retries and rate limiting."""
         if not self._check_rate_limit():
             raise Exception("Rate limit exceeded. Please try again later.")
@@ -2540,7 +2451,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                     retry_count + 1,
                     self._max_retries,
                 )
-                response = await self.ai_client.get_response(recent_messages, tools=tools)
+                response = await self.ai_client.get_response(recent_messages)
                 _LOGGER.debug(
                     "AI client returned response of length: %d", len(response or "")
                 )

@@ -50,25 +50,6 @@ class OpenAIClient(BaseAIClient):
             api_msg = {"role": msg.get("role", "user")}
             if "content" in msg and msg["content"] is not None:
                 api_msg["content"] = msg["content"]
-                
-            if "tool_calls" in msg:
-                api_msg["tool_calls"] = []
-                for tc in msg["tool_calls"]:
-                    api_msg["tool_calls"].append({
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": json.dumps(tc["arguments"])
-                        }
-                    })
-            if msg.get("role") == "tool":
-                api_msg["tool_call_id"] = msg.get("tool_call_id")
-            
-            # Ensure assistant messages with tool calls have at least null or empty content
-            if api_msg["role"] == "assistant" and "tool_calls" in api_msg and "content" not in api_msg:
-                api_msg["content"] = ""
-                
             openai_messages.append(api_msg)
 
         # Build payload with model-appropriate parameters
@@ -79,10 +60,6 @@ class OpenAIClient(BaseAIClient):
         if not is_restricted:
             payload.update({"temperature": 0.7, "top_p": 0.9})
             
-        tools = kwargs.get("tools")
-        if tools:
-            payload["tools"] = tools
-
         _LOGGER.debug("OpenAI request payload limit length: %s", len(json.dumps(payload)))
 
         async with aiohttp.ClientSession() as session:
@@ -111,27 +88,6 @@ class OpenAIClient(BaseAIClient):
                 choices = data.get("choices", [])
                 if choices and "message" in choices[0]:
                     msg = choices[0]["message"]
-                    
-                    if "tool_calls" in msg and msg["tool_calls"]:
-                        # Return standardized internal tool_calls response
-                        tool_calls = []
-                        for tc in msg["tool_calls"]:
-                            if tc.get("type") == "function":
-                                fn = tc.get("function", {})
-                                try:
-                                    args = json.loads(fn.get("arguments", "{}"))
-                                except json.JSONDecodeError:
-                                    args = {}
-                                tool_calls.append({
-                                    "id": tc.get("id"),
-                                    "name": fn.get("name"),
-                                    "arguments": args
-                                })
-                        return json.dumps({
-                            "request_type": "_mcp_tool_calls", 
-                            "tool_calls": tool_calls,
-                            "content": msg.get("content", "")
-                        })
 
                     content = msg.get("content", "")
                     if not content:

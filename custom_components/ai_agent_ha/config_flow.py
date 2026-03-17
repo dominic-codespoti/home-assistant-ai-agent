@@ -453,15 +453,6 @@ class AiAgentHaOptionsFlowHandler(config_entries.OptionsFlow):
                                     provider
                                 ]
 
-                    # Update MCP Settings
-                    from .const import CONF_MCP_PORT, CONF_ALLOWED_IPS, DEFAULT_MCP_PORT, DEFAULT_ALLOWED_IPS
-                    # Save MCP port
-                    if "mcp_port" in user_input:
-                        updated_data[CONF_MCP_PORT] = user_input["mcp_port"]
-                    # Save allowed IPs 
-                    if "allowed_ips" in user_input:
-                        updated_data[CONF_ALLOWED_IPS] = user_input["allowed_ips"]
-
                     try:
                         _LOGGER.debug(
                             f"Options flow - Final model config for {provider}: {updated_data['models'][provider]}"

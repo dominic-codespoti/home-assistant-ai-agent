@@ -38,29 +38,7 @@ class AnthropicClient(BaseAIClient):
             elif role == "user":
                 anthropic_messages.append({"role": "user", "content": content})
             elif role == "assistant":
-                if "tool_calls" in message:
-                    content_blocks = []
-                    if content:
-                        content_blocks.append({"type": "text", "text": content})
-                    for tc in message["tool_calls"]:
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tc["id"],
-                            "name": tc["name"],
-                            "input": tc["arguments"]
-                        })
-                    anthropic_messages.append({"role": "assistant", "content": content_blocks})
-                else:
-                    anthropic_messages.append({"role": "assistant", "content": content})
-            elif role == "tool":
-                anthropic_messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": message["tool_call_id"],
-                        "content": content
-                    }]
-                })
+                anthropic_messages.append({"role": "assistant", "content": content})
 
         payload = {
             "model": self.model,
@@ -73,20 +51,6 @@ class AnthropicClient(BaseAIClient):
         if system_message:
             payload["system"] = system_message
             
-        tools = kwargs.get("tools")
-        if tools:
-            anthropic_tools = []
-            for t in tools:
-                if t.get("type") == "function":
-                    func = t.get("function", {})
-                    anthropic_tools.append({
-                        "name": func.get("name"),
-                        "description": func.get("description", ""),
-                        "input_schema": func.get("parameters", {"type": "object", "properties": {}})
-                    })
-            if anthropic_tools:
-                payload["tools"] = anthropic_tools
-
         _LOGGER.debug("Anthropic request payload size: %d", len(json.dumps(payload)))
 
         async with aiohttp.ClientSession() as session:
@@ -101,25 +65,6 @@ class AnthropicClient(BaseAIClient):
                     _LOGGER.error("Anthropic API error %d: %s", resp.status, error_text[:500])
                     raise Exception(f"Anthropic API error {resp.status}")
                 data = await resp.json()
-                
-                if data.get("stop_reason") == "tool_use":
-                    tool_calls = []
-                    text_content = ""
-                    for block in data.get("content", []):
-                        if block.get("type") == "tool_use":
-                            tool_calls.append({
-                                "id": block.get("id"),
-                                "name": block.get("name"),
-                                "arguments": block.get("input")
-                            })
-                        elif block.get("type") == "text":
-                            text_content += block.get("text", "")
-                            
-                    return json.dumps({
-                        "request_type": "_mcp_tool_calls",
-                        "tool_calls": tool_calls,
-                        "content": text_content
-                    })
 
                 # Extract text from plain response
                 content_blocks = data.get("content", [])

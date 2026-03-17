@@ -16,9 +16,7 @@ The `ai_agent_ha` integration is a unified Home Assistant custom integration tha
 - **`const.py`**: Central repository for all constants (`DOMAIN`, configuration keys, provider lists).
 - **`services.yaml`**: Defines the services exposed to Home Assistant UI and Automations.
 - **`dashboard_templates.py`**: Pre-defined JSON-like templates used when the AI is asked to generate new HA dashboards.
-- **`mcp_server.py`**: Integration of the Model Context Protocol (MCP) server, allowing external clients to discover and interact with Home Assistant entities.
-- **`discovery.py` & `domain_registry.py`**: Handles discovery and capability mapping of Home Assistant entities for the MCP interface.
-- **`index_manager.py`**: Maintains a lightweight, unified state and structure index of the Home Assistant instance, primarily used by the MCP server.
+- **MCP Access:** External MCP client connectivity is provided by Home Assistant’s official `mcp_server` integration (`/api/mcp`). This repository no longer ships a custom MCP server implementation.
 
 ### Frontend Components (`custom_components/ai_agent_ha/frontend/`)
 - **`ai_agent_ha-panel.js`**: Web Component implementing the chat interface in HA.
@@ -28,6 +26,7 @@ The `ai_agent_ha` integration is a unified Home Assistant custom integration tha
 - **Modifying HA Context provided to AI:** Look in `agent.py` inside the methods building the system prompt (e.g., compiling states, devices, weather).
 - **Custom Services:** Start from `__init__.py` to see how the service handles the payload, then follow the call to `agent.py` method executions.
 - **Frontend Changes:** Modify `frontend/ai_agent_ha-panel.js`. Note the testing server in `tests/frontend/` for local UI iteration without full HA restarts.
+- **MCP Client setup/debugging:** Use the official Home Assistant MCP integration docs (`https://www.home-assistant.io/integrations/mcp_server/`) rather than repository-local server code.
 
 ## 📜 Development Rules & Patterns
 

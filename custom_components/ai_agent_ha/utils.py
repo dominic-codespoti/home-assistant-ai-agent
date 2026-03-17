@@ -4,10 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-
-from .const import DOMAIN, SYSTEM_ENTRY_UNIQUE_ID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,11 +70,3 @@ def sanitize_for_logging(data: Any, mask: str = "***REDACTED***") -> Any:
     else:
         # Primitive types (str, int, bool, etc.) - return as-is
         return data
-
-
-def get_system_entry(hass: HomeAssistant) -> ConfigEntry | None:
-    """Get the system configuration entry."""
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.unique_id == SYSTEM_ENTRY_UNIQUE_ID:
-            return entry
-    return None

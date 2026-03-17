@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced `get_entity_registry()` to include device_class, state_class, and unit_of_measurement attributes
 - Device class guidance in system prompts for improved AI understanding
 - Unit tests for new climate-related functions and critical system prompt fix
+- Added MCP orchestration smoke tests in `test_agent_mcp_flow.py` for `_mcp_tool_calls` and legacy helper-request rejection paths
 
 ## [0.99.6] - 2025-11-05
 ### Fixed

@@ -44,30 +44,44 @@ class AiAgentHaPanel extends LitElement {
   static get styles() {
     return css`
       :host {
-        background: var(--primary-background-color);
+        --panel-max-width: 1080px;
+        --panel-radius: 16px;
+        --panel-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+        --panel-border: 1px solid color-mix(in srgb, var(--divider-color) 70%, transparent);
+        --surface-elevated: color-mix(in srgb, var(--card-background-color) 92%, var(--primary-background-color));
+        --surface-muted: color-mix(in srgb, var(--secondary-background-color) 84%, var(--card-background-color));
+        --bubble-user: linear-gradient(135deg, var(--primary-color), color-mix(in srgb, var(--primary-color) 75%, #7c4dff));
+        --bubble-assistant: color-mix(in srgb, var(--secondary-background-color) 90%, var(--card-background-color));
+        background: linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--primary-background-color) 88%, #fff) 0%,
+          color-mix(in srgb, var(--secondary-background-color) 70%, #fff) 100%
+        );
         -webkit-font-smoothing: antialiased;
         display: flex;
         flex-direction: column;
-        height: 100vh;
+        height: 100dvh;
       }
       .header {
-        background: var(--app-header-background-color);
+        background: color-mix(in srgb, var(--app-header-background-color) 90%, #0f172a);
         color: var(--app-header-text-color);
-        padding: 16px 24px;
+        padding: 14px 24px;
         display: flex;
         align-items: center;
         gap: 12px;
-        font-size: 20px;
-        font-weight: 500;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        position: relative;
+        font-size: 18px;
+        font-weight: 600;
+        box-shadow: 0 2px 12px rgba(15, 23, 42, 0.18);
+        position: sticky;
+        top: 0;
         z-index: 100;
+        backdrop-filter: blur(8px);
       }
       .clear-button {
         margin-left: auto;
         border: none;
-        border-radius: 16px;
-        background: var(--error-color);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--error-color) 90%, #111827);
         color: #fff;
         cursor: pointer;
         transition: all 0.2s ease;
@@ -87,10 +101,9 @@ class AiAgentHaPanel extends LitElement {
         font-family: inherit;
       }
       .clear-button:hover {
-        background: var(--error-color);
-        opacity: 0.92;
+        opacity: 0.95;
         transform: translateY(-1px);
-        box-shadow: 0 2px 6px rgba(0,0,0,0.13);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
       }
       .clear-button:active {
         transform: translateY(0);
@@ -107,38 +120,41 @@ class AiAgentHaPanel extends LitElement {
       }
       .content {
         flex-grow: 1;
-        padding: 24px;
+        padding: 18px 16px 24px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
+        align-items: center;
       }
       .chat-container {
         width: 100%;
+        max-width: var(--panel-max-width);
         padding: 0;
         display: flex;
         flex-direction: column;
         flex-grow: 1;
         height: 100%;
+        gap: 10px;
       }
       .messages {
         overflow-y: auto;
-        border: 1px solid var(--divider-color);
-        border-radius: 12px;
-        margin-bottom: 24px;
-        padding: 0;
-        background: var(--primary-background-color);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: var(--panel-border);
+        border-radius: var(--panel-radius);
+        margin-bottom: 10px;
+        padding: 10px;
+        background: var(--surface-elevated);
+        box-shadow: var(--panel-shadow);
         flex-grow: 1;
         width: 100%;
       }
       .prompts-section {
-        margin-bottom: 12px;
+        margin-bottom: 8px;
         padding: 12px 16px;
-        background: var(--secondary-background-color);
-        border-radius: 16px;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
-        border: 1px solid var(--divider-color);
+        background: var(--surface-muted);
+        border-radius: var(--panel-radius);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+        border: var(--panel-border);
       }
       .prompts-header {
         display: flex;
@@ -175,8 +191,8 @@ class AiAgentHaPanel extends LitElement {
         margin-bottom: 8px;
       }
       .prompt-bubble {
-        background: var(--primary-background-color);
-        border: 1px solid var(--divider-color);
+        background: color-mix(in srgb, var(--card-background-color) 85%, transparent);
+        border: 1px solid color-mix(in srgb, var(--divider-color) 78%, transparent);
         border-radius: 20px;
         padding: 6px 12px;
         cursor: pointer;
@@ -190,18 +206,18 @@ class AiAgentHaPanel extends LitElement {
         text-overflow: ellipsis;
       }
       .prompt-bubble:hover {
-        border-color: var(--primary-color);
-        background: var(--primary-color);
+        border-color: color-mix(in srgb, var(--primary-color) 65%, white);
+        background: color-mix(in srgb, var(--primary-color) 88%, white);
         color: var(--text-primary-color);
         transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 3px 8px rgba(2, 132, 199, 0.25);
       }
       .prompt-bubble:active {
         transform: translateY(0);
       }
       .history-bubble {
-        background: var(--primary-background-color);
-        border: 1px solid var(--accent-color);
+        background: color-mix(in srgb, var(--card-background-color) 86%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 70%, transparent);
         border-radius: 20px;
         padding: 6px 12px;
         cursor: pointer;
@@ -218,10 +234,10 @@ class AiAgentHaPanel extends LitElement {
         gap: 6px;
       }
       .history-bubble:hover {
-        background: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 92%, white);
         color: var(--text-primary-color);
         transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 3px 8px rgba(234, 88, 12, 0.22);
       }
       .history-delete {
         opacity: 0;
@@ -236,49 +252,52 @@ class AiAgentHaPanel extends LitElement {
       }
       .message {
         margin-bottom: 16px;
-        padding: 12px 16px;
-        border-radius: 12px;
+        padding: 12px 14px;
+        border-radius: 14px;
         max-width: 80%;
-        line-height: 1.5;
+        line-height: 1.55;
         animation: fadeIn 0.3s ease-out;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
         word-wrap: break-word;
       }
       .user-message {
-        background: var(--primary-color);
+        background: var(--bubble-user);
         color: var(--text-primary-color);
         margin-left: auto;
-        border-bottom-right-radius: 4px;
+        border-bottom-right-radius: 6px;
       }
       .assistant-message {
-        background: var(--secondary-background-color);
+        background: var(--bubble-assistant);
         margin-right: auto;
-        border-bottom-left-radius: 4px;
+        border-bottom-left-radius: 6px;
+        border: 1px solid color-mix(in srgb, var(--divider-color) 68%, transparent);
       }
       .input-container {
         position: relative;
         width: 100%;
-        background: var(--card-background-color);
-        border: 1px solid var(--divider-color);
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        margin-bottom: 24px;
+        background: var(--surface-elevated);
+        border: var(--panel-border);
+        border-radius: var(--panel-radius);
+        box-shadow: var(--panel-shadow);
+        margin-bottom: 8px;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
       }
       .input-container:focus-within {
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.1);
+        border-color: color-mix(in srgb, var(--primary-color) 70%, white);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 24%, transparent);
       }
       .input-main {
         display: flex;
         align-items: flex-end;
-        padding: 12px;
+        padding: 10px;
         gap: 12px;
       }
       .input-wrapper {
         flex-grow: 1;
         position: relative;
-        border: 1px solid var(--divider-color);
+        border: 1px solid color-mix(in srgb, var(--divider-color) 80%, transparent);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--card-background-color) 90%, white);
       }
       textarea {
         width: 100%;
@@ -288,11 +307,12 @@ class AiAgentHaPanel extends LitElement {
         border: none;
         outline: none;
         resize: none;
-        font-size: 16px;
+        font-size: 15px;
         line-height: 1.5;
         background: transparent;
         color: var(--primary-text-color);
         font-family: inherit;
+        border-radius: 12px;
       }
       textarea::placeholder {
         color: var(--secondary-text-color);
@@ -302,9 +322,9 @@ class AiAgentHaPanel extends LitElement {
         align-items: center;
         justify-content: space-between;
         padding: 8px 16px 12px 16px;
-        border-top: 1px solid var(--divider-color);
-        background: var(--card-background-color);
-        border-radius: 0 0 12px 12px;
+        border-top: 1px solid color-mix(in srgb, var(--divider-color) 75%, transparent);
+        background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
+        border-radius: 0 0 var(--panel-radius) var(--panel-radius);
       }
       .provider-selector {
         position: relative;
@@ -316,9 +336,9 @@ class AiAgentHaPanel extends LitElement {
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 6px 12px;
-        background: var(--secondary-background-color);
-        border: 1px solid var(--divider-color);
+        padding: 7px 12px;
+        background: color-mix(in srgb, var(--secondary-background-color) 90%, white);
+        border: 1px solid color-mix(in srgb, var(--divider-color) 78%, transparent);
         border-radius: 8px;
         cursor: pointer;
         font-size: 14px;
@@ -335,13 +355,13 @@ class AiAgentHaPanel extends LitElement {
         padding-right: 30px;
       }
       .provider-button:hover {
-        background-color: var(--primary-background-color);
-        border-color: var(--primary-color);
+        background-color: color-mix(in srgb, var(--primary-background-color) 85%, white);
+        border-color: color-mix(in srgb, var(--primary-color) 62%, white);
       }
       .provider-button:focus {
         outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.2);
+        border-color: color-mix(in srgb, var(--primary-color) 70%, white);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 24%, transparent);
       }
       .provider-label {
         font-size: 12px;
@@ -361,11 +381,11 @@ class AiAgentHaPanel extends LitElement {
         margin: 0;
       }
       .thinking-panel {
-        border: 1px dashed var(--divider-color);
-        border-radius: 10px;
+        border: 1px dashed color-mix(in srgb, var(--divider-color) 82%, transparent);
+        border-radius: 12px;
         padding: 10px 12px;
         margin: 12px 0;
-        background: var(--secondary-background-color);
+        background: color-mix(in srgb, var(--secondary-background-color) 84%, white);
       }
       .thinking-header {
         display: flex;
@@ -427,13 +447,14 @@ class AiAgentHaPanel extends LitElement {
         --mdc-typography-button-font-weight: 500;
         --mdc-button-height: 36px;
         --mdc-button-padding: 0 16px;
-        border-radius: 8px;
+        border-radius: 999px;
         transition: all 0.2s ease;
         min-width: 80px;
+        box-shadow: 0 2px 10px color-mix(in srgb, var(--primary-color) 30%, transparent);
       }
       .send-button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 6px 14px color-mix(in srgb, var(--primary-color) 35%, transparent);
       }
       .send-button:active {
         transform: translateY(0);
@@ -448,8 +469,9 @@ class AiAgentHaPanel extends LitElement {
         gap: 12px;
         margin-bottom: 16px;
         padding: 12px 16px;
-        border-radius: 12px;
-        background: var(--secondary-background-color);
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--secondary-background-color) 88%, white);
+        border: 1px solid color-mix(in srgb, var(--divider-color) 78%, transparent);
         margin-right: auto;
         max-width: 80%;
         animation: fadeIn 0.3s ease-out;
@@ -489,18 +511,18 @@ class AiAgentHaPanel extends LitElement {
         color: var(--error-color);
         padding: 16px;
         margin: 8px 0;
-        border-radius: 12px;
-        background: var(--error-background-color);
-        border: 1px solid var(--error-color);
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--error-background-color) 82%, white);
+        border: 1px solid color-mix(in srgb, var(--error-color) 60%, white);
         animation: fadeIn 0.3s ease-out;
       }
       .automation-suggestion {
-        background: var(--secondary-background-color);
-        border: 1px solid var(--primary-color);
-        border-radius: 12px;
+        background: color-mix(in srgb, var(--secondary-background-color) 82%, white);
+        border: 1px solid color-mix(in srgb, var(--primary-color) 40%, white);
+        border-radius: 14px;
         padding: 16px;
         margin: 8px 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
         position: relative;
         z-index: 10;
       }
@@ -539,7 +561,7 @@ class AiAgentHaPanel extends LitElement {
       .automation-details {
         margin-top: 8px;
         padding: 8px;
-        background: var(--primary-background-color);
+        background: color-mix(in srgb, var(--primary-background-color) 80%, white);
         border-radius: 8px;
         font-family: monospace;
         font-size: 12px;
@@ -550,12 +572,12 @@ class AiAgentHaPanel extends LitElement {
         border: 1px solid var(--divider-color);
       }
       .dashboard-suggestion {
-        background: var(--secondary-background-color);
-        border: 1px solid var(--info-color, #2196f3);
-        border-radius: 12px;
+        background: color-mix(in srgb, var(--secondary-background-color) 82%, white);
+        border: 1px solid color-mix(in srgb, var(--info-color, #2196f3) 42%, white);
+        border-radius: 14px;
         padding: 16px;
         margin: 8px 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
         position: relative;
         z-index: 10;
       }
@@ -594,7 +616,7 @@ class AiAgentHaPanel extends LitElement {
       .dashboard-details {
         margin-top: 8px;
         padding: 8px;
-        background: var(--primary-background-color);
+        background: color-mix(in srgb, var(--primary-background-color) 80%, white);
         border-radius: 8px;
         font-family: monospace;
         font-size: 12px;
@@ -608,6 +630,36 @@ class AiAgentHaPanel extends LitElement {
         color: var(--error-color);
         font-size: 14px;
         padding: 8px;
+      }
+      @media (max-width: 900px) {
+        .content {
+          padding: 12px 10px 16px;
+        }
+        .header {
+          font-size: 16px;
+          padding: 12px 14px;
+        }
+        .clear-button {
+          height: 32px;
+          padding: 6px 10px;
+          font-size: 12px;
+        }
+        .message,
+        .loading {
+          max-width: 92%;
+        }
+        .input-footer {
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .provider-selector {
+          width: 100%;
+          justify-content: space-between;
+        }
+        .provider-button {
+          min-width: 0;
+          width: 100%;
+        }
       }
     `;
   }

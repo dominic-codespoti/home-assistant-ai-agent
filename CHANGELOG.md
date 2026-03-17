@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Capped Gemini output tokens for lower average cost
   - Reduced payload size by skipping empty turns and simplifying role mapping
   - Improved text extraction fallback across candidate parts
+- Modernized the Home AI Agent panel visual styling (`ai_agent_ha-panel.js`) with updated surfaces, spacing, bubble styling, controls, and responsive polish while preserving behavior.
 
 ### Removed
 - Removed the custom MCP server implementation and related legacy modules (`mcp_server.py`, `discovery.py`, `index_manager.py`, `domain_registry.py`, and `custom_tools/*`).

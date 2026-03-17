@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import aiohttp
@@ -13,6 +13,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_WEATHER_ENTITY, DOMAIN
+from .official_mcp_bridge import OfficialMCPBridge
 from .utils import sanitize_for_logging
 from .models import (
     BaseAIClient,
@@ -38,23 +39,18 @@ class AiAgentHaAgent:
         "content": (
             "You are a helpful AI assistant integrated with Home Assistant.\n"
             "You must respond with JSON only.\n\n"
-            "DATA ACCESS:\n"
-            "Request Home Assistant data using either:\n"
-            "- {\"request_type\": \"data_request\", \"request\": \"<request_name>\", \"parameters\": {...}}\n"
-            "- or a direct request type, e.g. {\"request_type\": \"get_entities_by_domain\", \"parameters\": {\"domain\": \"light\"}}\n\n"
-            "For indoor/outdoor temperature requests, combine:\n"
-            "- {\"request_type\": \"get_climate_related_entities\", \"parameters\": {}}\n"
-            "- {\"request_type\": \"get_weather_data\", \"parameters\": {}}\n\n"
-            "SERVICE EXECUTION:\n"
-            "Use:\n"
-            "{\"request_type\": \"call_service\", \"domain\": \"light\", \"service\": \"turn_on\", \"target\": {\"entity_id\": \"light.kitchen\"}, \"service_data\": {}}\n\n"
+            "OFFICIAL MCP TOOL USAGE:\n"
+            "When you need Home Assistant data or actions, respond with:\n"
+            "{\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"<tool_name>\", \"arguments\": {...}}]}\n"
+            "Use only tool names listed in AVAILABLE_MCP_TOOLS.\n"
+            "After receiving tool results, either request more tool calls or finish.\n\n"
             "FINAL ANSWER:\n"
             "{\"request_type\": \"final_response\", \"response\": \"...\"}\n\n"
             "STRICT RULES:\n"
             "1. Gather required data before returning final_response.\n"
-            "2. If a request returns no results, immediately broaden or adjust your query.\n"
+            "2. If a tool result returns no useful data, call a different tool or broaden arguments.\n"
             "3. Do not emit text outside JSON.\n"
-            "4. Never use MCP tool call envelopes such as _mcp_tool_calls."
+            "4. Never use legacy data_request/get_entities helper request types."
         ),
     }
 
@@ -63,19 +59,53 @@ class AiAgentHaAgent:
         "content": (
             "You are a helpful AI assistant integrated with Home Assistant.\n"
             "You must respond with JSON only.\n"
-            "Use data_request and call_service objects to gather data and control Home Assistant.\n"
+            "Use official MCP tool calls for all Home Assistant data/actions via:\n"
+            "{\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"<tool_name>\", \"arguments\": {...}}]}.\n"
             "Return final output as {\"request_type\": \"final_response\", \"response\": \"...\"}.\n"
-            "Never use _mcp_tool_calls."
+            "Never use legacy data_request request types."
         ),
     }
 
-    def __init__(self, hass: HomeAssistant, config: Dict[str, Any]):
+    LEGACY_DATA_REQUEST_TYPES = {
+        "get_entity_state",
+        "get_entities_by_domain",
+        "get_entities_by_device_class",
+        "get_climate_related_entities",
+        "get_entities_by_area",
+        "get_entities",
+        "get_calendar_events",
+        "get_automations",
+        "get_entity_registry",
+        "get_device_registry",
+        "get_weather_data",
+        "get_area_registry",
+        "get_history",
+        "get_person_data",
+        "get_statistics",
+        "get_scenes",
+        "get_dashboards",
+        "get_dashboard_config",
+        "set_entity_state",
+        "create_automation",
+        "create_dashboard",
+        "update_dashboard",
+    }
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: Dict[str, Any],
+        mcp_bridge: OfficialMCPBridge | None = None,
+    ):
         """Initialize the agent with provider selection."""
         self.hass = hass
         self.config = config
         self.conversation_history: List[Dict[str, Any]] = []
         self._cache: Dict[str, Any] = {}
         self.ai_client: BaseAIClient
+        self._mcp_bridge: OfficialMCPBridge | None = mcp_bridge
+        if self._mcp_bridge is None and DOMAIN in hass.data:
+            self._mcp_bridge = hass.data[DOMAIN].get("mcp_bridge")
         self._cache_timeout = 300  # 5 minutes
         self._max_retries = 10
         self._retry_delay = 1  # seconds
@@ -92,11 +122,12 @@ class AiAgentHaAgent:
 
         # Set the appropriate system prompt based on provider
         if provider == "local":
-            self.system_prompt = self.SYSTEM_PROMPT_LOCAL
+            self._base_system_prompt = dict(self.SYSTEM_PROMPT_LOCAL)
             _LOGGER.debug("Using local-optimized system prompt")
         else:
-            self.system_prompt = self.SYSTEM_PROMPT
+            self._base_system_prompt = dict(self.SYSTEM_PROMPT)
             _LOGGER.debug("Using standard system prompt")
+        self.system_prompt = dict(self._base_system_prompt)
 
         # Initialize the appropriate AI client with model selection
         if provider == "openai":
@@ -191,6 +222,86 @@ class AiAgentHaAgent:
     def _set_cached_data(self, key: str, data: Any) -> None:
         """Store data in cache with timestamp."""
         self._cache[key] = (time.time(), data)
+
+    async def _get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """Get official MCP tools exposed by Home Assistant."""
+        if self._mcp_bridge is None:
+            _LOGGER.error("Official MCP bridge is not initialized")
+            return []
+
+        try:
+            return await self._mcp_bridge.async_list_tools()
+        except Exception as err:
+            _LOGGER.error("Failed to fetch official MCP tools: %s", err)
+            return []
+
+    def _set_system_prompt_with_mcp_tools(self, mcp_tools: List[Dict[str, Any]]) -> None:
+        """Inject available MCP tool metadata into the system prompt."""
+        compact_tools = []
+        for tool in mcp_tools:
+            schema = tool.get("input_schema") or {}
+            properties = schema.get("properties") if isinstance(schema, dict) else {}
+            compact_tools.append(
+                {
+                    "name": tool.get("name"),
+                    "description": tool.get("description", ""),
+                    "parameters": sorted(properties.keys())
+                    if isinstance(properties, dict)
+                    else [],
+                }
+            )
+
+        prompt_content = (
+            f"{self._base_system_prompt['content']}\n\n"
+            f"AVAILABLE_MCP_TOOLS={json.dumps(compact_tools, ensure_ascii=False)}"
+        )
+        self.system_prompt = {"role": "system", "content": prompt_content}
+
+    async def _execute_mcp_tool_calls(
+        self, tool_calls: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Execute MCP tool calls and return serialized results."""
+        results: List[Dict[str, Any]] = []
+
+        if self._mcp_bridge is None:
+            return [{"error": "Official mcp_server bridge is unavailable"}]
+
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                results.append({"error": f"Invalid tool call payload: {call}"})
+                continue
+
+            tool_name = call.get("name") or call.get("tool_name")
+            arguments = call.get("arguments")
+            if not isinstance(arguments, dict):
+                arguments = {}
+
+            if not tool_name:
+                results.append({"error": f"Missing tool name in call: {call}"})
+                continue
+
+            try:
+                tool_result = await self._mcp_bridge.async_call_tool(
+                    tool_name, arguments
+                )
+                results.append(
+                    {
+                        "name": tool_name,
+                        "arguments": arguments,
+                        "result": tool_result,
+                    }
+                )
+            except Exception as err:
+                _LOGGER.error("Official MCP tool call failed (%s): %s", tool_name, err)
+                results.append(
+                    {
+                        "name": tool_name,
+                        "arguments": arguments,
+                        "error": str(err),
+                    }
+                )
+
+        return results
 
     def _sanitize_automation_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Sanitize automation configuration to prevent injection attacks."""
@@ -1692,16 +1803,32 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                     else {"error": "Invalid cached result"}
                 )
 
-            # Add system message to conversation if it's the first message
-            if not self.conversation_history:
-                _LOGGER.debug("Adding system message to new conversation")
-                self.conversation_history.append(self.system_prompt)
+            # Official MCP tools are required for query orchestration.
+            mcp_tools = await self._get_mcp_tools()
+            if not mcp_tools:
+                return _with_debug(
+                    {
+                        "success": False,
+                        "error": (
+                            "Official mcp_server tools are unavailable. "
+                            "Ensure Home Assistant mcp_server is configured and loaded."
+                        ),
+                    }
+                )
+
+            self._set_system_prompt_with_mcp_tools(mcp_tools)
+            if self.conversation_history and self.conversation_history[0].get(
+                "role"
+            ) == "system":
+                self.conversation_history[0] = self.system_prompt
+            else:
+                self.conversation_history.insert(0, self.system_prompt)
 
             # Add user query to conversation
             self.conversation_history.append({"role": "user", "content": user_query})
             _LOGGER.debug("Added user query to conversation history")
 
-            max_iterations = 5  # Prevent infinite loops
+            max_iterations = 8  # Prevent infinite loops while allowing tool rounds
             iteration = 0
 
             while iteration < max_iterations:
@@ -1711,7 +1838,7 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                 try:
                     # Get AI response
                     _LOGGER.debug("Requesting response from AI provider")
-                    response = await self._get_ai_response()
+                    response = await self._get_ai_response(tools=mcp_tools)
                     _LOGGER.debug("Received response from AI provider: %s", response)
 
                     try:
@@ -1810,181 +1937,50 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                             response_data.get("request_type", "unknown"),
                         )
 
-                        # Check if this is a data request (either format)
-                        data_request_types = [
-                            "get_entity_state",
-                            "get_entities_by_domain",
-                            "get_entities_by_device_class",
-                            "get_climate_related_entities",
-                            "get_entities_by_area",
-                            "get_entities",
-                            "get_calendar_events",
-                            "get_automations",
-                            "get_entity_registry",
-                            "get_device_registry",
-                            "get_weather_data",
-                            "get_area_registry",
-                            "get_history",
-                            "get_person_data",
-                            "get_statistics",
-                            "get_scenes",
-                            "get_dashboards",
-                            "get_dashboard_config",
-                            "set_entity_state",
-                            "create_automation",
-                            "create_dashboard",
-                            "update_dashboard",
-                        ]
+                        request_type = response_data.get("request_type")
 
-                        if (
-                            response_data.get("request_type") == "data_request"
-                            or response_data.get("request_type") in data_request_types
-                        ):
-                            # Handle data request (both standard format and direct request type)
-                            if response_data.get("request_type") == "data_request":
-                                request_type = response_data.get("request")
-                            else:
-                                request_type = response_data.get("request_type")
-                            parameters = response_data.get("parameters", {})
-                            _LOGGER.debug(
-                                "Processing data request: %s with parameters: %s",
-                                request_type,
-                                json.dumps(parameters),
-                            )
+                        if request_type == "_mcp_tool_calls":
+                            tool_calls = response_data.get("tool_calls")
+                            if not isinstance(tool_calls, list):
+                                tool_calls = response_data.get("calls")
 
-                            # Add AI's response to conversation history
+                            if not isinstance(tool_calls, list) or not tool_calls:
+                                return _with_debug(
+                                    {
+                                        "success": False,
+                                        "error": "Invalid _mcp_tool_calls payload",
+                                    }
+                                )
+
                             self.conversation_history.append(
                                 {
                                     "role": "assistant",
-                                    "content": json.dumps(
-                                        response_data
-                                    ),  # Store clean JSON
+                                    "content": json.dumps(response_data),
                                 }
                             )
-
-                            # Get requested data
-                            data: Union[Dict[str, Any], List[Dict[str, Any]]]
-                            if request_type == "get_entity_state":
-                                data = await self.get_entity_state(
-                                    parameters.get("entity_id")
-                                )
-                            elif request_type == "get_entities_by_domain":
-                                data = await self.get_entities_by_domain(
-                                    parameters.get("domain")
-                                )
-                            elif request_type == "get_entities_by_area":
-                                data = await self.get_entities_by_area(
-                                    parameters.get("area_id")
-                                )
-                            elif request_type == "get_entities":
-                                data = await self.get_entities(
-                                    area_id=parameters.get("area_id"),
-                                    area_ids=parameters.get("area_ids"),
-                                    limit=parameters.get("limit", 100),
-                                )
-                            elif request_type == "get_entities_by_device_class":
-                                data = await self.get_entities_by_device_class(
-                                    parameters.get("device_class"),
-                                    parameters.get("domain"),
-                                )
-                            elif request_type == "get_climate_related_entities":
-                                data = await self.get_climate_related_entities()
-                            elif request_type == "get_calendar_events":
-                                data = await self.get_calendar_events(
-                                    parameters.get("entity_id")
-                                )
-                            elif request_type == "get_automations":
-                                data = await self.get_automations()
-                            elif request_type == "get_entity_registry":
-                                data = await self.get_entity_registry()
-                            elif request_type == "get_device_registry":
-                                data = await self.get_device_registry()
-                            elif request_type == "get_weather_data":
-                                data = await self.get_weather_data()
-                            elif request_type == "get_area_registry":
-                                data = await self.get_area_registry()
-                            elif request_type == "get_history":
-                                data = await self.get_history(
-                                    parameters.get("entity_id"),
-                                    parameters.get("hours", 24),
-                                )
-                            elif request_type == "get_person_data":
-                                data = await self.get_person_data()
-                            elif request_type == "get_statistics":
-                                data = await self.get_statistics(
-                                    parameters.get("entity_id")
-                                )
-                            elif request_type == "get_scenes":
-                                data = await self.get_scenes()
-                            elif request_type == "get_dashboards":
-                                data = await self.get_dashboards()
-                            elif request_type == "get_dashboard_config":
-                                data = await self.get_dashboard_config(
-                                    parameters.get("dashboard_url")
-                                )
-                            elif request_type == "set_entity_state":
-                                data = await self.set_entity_state(
-                                    parameters.get("entity_id"),
-                                    parameters.get("state"),
-                                    parameters.get("attributes"),
-                                )
-                            elif request_type == "create_automation":
-                                # Robust extraction: try nested key, then parameters, then response_data itself
-                                automation = parameters.get("automation") if parameters.get("automation") else (parameters if parameters.get("alias") else {k: v for k, v in response_data.items() if k != "request_type"})
-                                data = await self.create_automation(automation)
-                            elif request_type == "create_dashboard":
-                                # Robust extraction: try nested key, then parameters, then response_data itself
-                                db_config = parameters.get("dashboard_config") if parameters.get("dashboard_config") else (parameters if parameters.get("title") else {k: v for k, v in response_data.items() if k != "request_type"})
-                                data = await self.create_dashboard(db_config)
-                            elif request_type == "update_dashboard":
-                                # Robust extraction: try nested key, then parameters, then response_data itself
-                                db_config = parameters.get("dashboard_config") if parameters.get("dashboard_config") else (parameters if parameters.get("title") else {k: v for k, v in response_data.items() if k != "request_type"})
-                                data = await self.update_dashboard(
-                                    parameters.get("dashboard_url") or response_data.get("dashboard_url"),
-                                    db_config,
-                                )
-                            else:
-                                data = {
-                                    "error": f"Unknown request type: {request_type}"
-                                }
-                                _LOGGER.warning(
-                                    "Unknown request type: %s", request_type
-                                )
-
-                            # Check if any data request resulted in an error
-                            if isinstance(data, dict) and "error" in data:
-                                return _with_debug(
-                                    {"success": False, "error": data["error"]}
-                                )
-                            elif isinstance(data, list) and any(
-                                "error" in item
-                                for item in data
-                                if isinstance(item, dict)
-                            ):
-                                errors = [
-                                    item["error"]
-                                    for item in data
-                                    if isinstance(item, dict) and "error" in item
-                                ]
-                                return _with_debug(
-                                    {"success": False, "error": "; ".join(errors)}
-                                )
-
-                            _LOGGER.debug(
-                                "Retrieved data for request: %s",
-                                json.dumps(data, default=str),
-                            )
-
-                            # Add data to conversation as a user message (not system to avoid overwriting system prompt in Anthropic API)
+                            tool_results = await self._execute_mcp_tool_calls(tool_calls)
                             self.conversation_history.append(
                                 {
                                     "role": "user",
-                                    "content": json.dumps({"data": data}, default=str),
+                                    "content": json.dumps(
+                                        {"mcp_tool_results": tool_results}, default=str
+                                    ),
                                 }
                             )
                             continue
 
-                        elif response_data.get("request_type") == "final_response":
+                        if request_type == "data_request" or request_type in self.LEGACY_DATA_REQUEST_TYPES:
+                            return _with_debug(
+                                {
+                                    "success": False,
+                                    "error": (
+                                        "Legacy internal helper requests are disabled. "
+                                        "Use official _mcp_tool_calls."
+                                    ),
+                                }
+                            )
+
+                        elif request_type == "final_response":
                             # Add final response to conversation history
                             self.conversation_history.append(
                                 {
@@ -2057,52 +2053,16 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                             result = _with_debug(result)
                             self._set_cached_data(cache_key, result)
                             return result
-                        elif response_data.get("request_type") in [
-                            "get_entities",
-                            "get_entities_by_area",
-                        ]:
-                            # Handle direct get_entities request (for backward compatibility)
-                            parameters = response_data.get("parameters", {})
-                            _LOGGER.debug(
-                                "Processing direct get_entities request with parameters: %s",
-                                json.dumps(parameters),
-                            )
-
-                            # Add AI's response to conversation history
-                            self.conversation_history.append(
+                        elif request_type in {"get_entities", "get_entities_by_area"}:
+                            return _with_debug(
                                 {
-                                    "role": "assistant",
-                                    "content": json.dumps(
-                                        response_data
-                                    ),  # Store clean JSON
+                                    "success": False,
+                                    "error": (
+                                        "Legacy direct entity helper requests are disabled. "
+                                        "Use official _mcp_tool_calls."
+                                    ),
                                 }
                             )
-
-                            # Get entities data
-                            if response_data.get("request_type") == "get_entities":
-                                data = await self.get_entities(
-                                    area_id=parameters.get("area_id"),
-                                    area_ids=parameters.get("area_ids"),
-                                    limit=parameters.get("limit", 100),
-                                )
-                            else:  # get_entities_by_area
-                                data = await self.get_entities_by_area(
-                                    parameters.get("area_id")
-                                )
-
-                            _LOGGER.debug(
-                                "Retrieved %d entities",
-                                len(data) if isinstance(data, list) else 1,
-                            )
-
-                            # Add data to conversation as a user message (not system to avoid overwriting system prompt in Anthropic API)
-                            self.conversation_history.append(
-                                {
-                                    "role": "user",
-                                    "content": json.dumps({"data": data}, default=str),
-                                }
-                            )
-                            continue
                         elif response_data.get("request_type") == "call_service":
                             # Handle service call request
                             domain = response_data.get("domain")
@@ -2110,78 +2070,22 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                             target = response_data.get("target", {})
                             service_data = response_data.get("service_data", {})
 
-                            # Resolve nested requests in target
-                            if target and "entity_id" in target:
-                                entity_id_value = target["entity_id"]
-                                if (
-                                    isinstance(entity_id_value, dict)
-                                    and "request_type" in entity_id_value
-                                ):
-                                    # This is a nested request, resolve it
-                                    nested_request_type = entity_id_value.get(
-                                        "request_type"
-                                    )
-                                    nested_parameters = entity_id_value.get(
-                                        "parameters", {}
-                                    )
-
-                                    _LOGGER.debug(
-                                        "Resolving nested request: %s with parameters: %s",
-                                        nested_request_type,
-                                        json.dumps(nested_parameters),
-                                    )
-
-                                    # Resolve the nested request
-                                    if nested_request_type == "get_entities":
-                                        entities_data = await self.get_entities(
-                                            area_id=nested_parameters.get("area_id"),
-                                            area_ids=nested_parameters.get("area_ids"),
-                                            limit=nested_parameters.get("limit", 100),
-                                        )
-                                    elif nested_request_type == "get_entities_by_area":
-                                        entities_data = await self.get_entities_by_area(
-                                            nested_parameters.get("area_id")
-                                        )
-                                    elif (
-                                        nested_request_type == "get_entities_by_domain"
-                                    ):
-                                        entities_data = (
-                                            await self.get_entities_by_domain(
-                                                nested_parameters.get("domain")
-                                            )
-                                        )
-                                    else:
-                                        _LOGGER.error(
-                                            "Unsupported nested request type: %s",
-                                            nested_request_type,
-                                        )
-                                        return {
-                                            "success": False,
-                                            "error": f"Unsupported nested request type: {nested_request_type}",
-                                        }
-
-                                    # Extract entity IDs from the resolved data
-                                    if isinstance(entities_data, list):
-                                        entity_ids = [
-                                            entity.get("entity_id")
-                                            for entity in entities_data
-                                            if entity.get("entity_id")
-                                        ]
-                                        target["entity_id"] = entity_ids
-                                        _LOGGER.debug(
-                                            "Resolved nested request to entity IDs: %s",
-                                            entity_ids,
-                                        )
-                                    else:
-                                        _LOGGER.error(
-                                            "Nested request returned unexpected data format"
-                                        )
-                                        return _with_debug(
-                                            {
-                                                "success": False,
-                                                "error": "Nested request returned unexpected data format",
-                                            }
-                                        )
+                            # Legacy nested helper requests are no longer supported.
+                            if (
+                                target
+                                and "entity_id" in target
+                                and isinstance(target["entity_id"], dict)
+                                and "request_type" in target["entity_id"]
+                            ):
+                                return _with_debug(
+                                    {
+                                        "success": False,
+                                        "error": (
+                                            "Nested legacy helper requests in call_service "
+                                            "are disabled. Use _mcp_tool_calls."
+                                        ),
+                                    }
+                                )
 
                             # Handle backward compatibility with old format
                             if not domain or not service:
@@ -2447,7 +2351,9 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
             "conversation": history_tail,
         }
 
-    async def _get_ai_response(self) -> str:
+    async def _get_ai_response(
+        self, tools: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
         """Get response from the selected AI provider with retries and rate limiting."""
         if not self._check_rate_limit():
             raise Exception("Rate limit exceeded. Please try again later.")
@@ -2473,7 +2379,9 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
                     retry_count + 1,
                     self._max_retries,
                 )
-                response = await self.ai_client.get_response(recent_messages)
+                response = await self.ai_client.get_response(
+                    recent_messages, tools=tools or []
+                )
                 _LOGGER.debug(
                     "AI client returned response of length: %d", len(response or "")
                 )

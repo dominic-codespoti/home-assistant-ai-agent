@@ -19,7 +19,7 @@ Click the button above to install AI Agent HA directly through HACS, or see the 
 - 🔒 **Secure**: API keys stored securely in Home Assistant
 - 🎨 **Beautiful UI**: Clean, modern chat interface
 - 🔄 **Real-time**: Instant responses and updates
-- 🔌 **Official MCP Integration Compatible**: Use Home Assistant's built-in `mcp_server` integration for external MCP clients (Claude Desktop, Cursor, etc.).
+- 🔌 **Official MCP Integration Native**: AI Agent HA now executes Home Assistant actions through the official `mcp_server` tool surface (and remains compatible with external MCP clients like Claude Desktop and Cursor).
 
 ## 📸 Screenshots
 
@@ -255,6 +255,8 @@ The AI can access comprehensive Home Assistant data:
 
 ### Model Context Protocol (MCP) Server
 AI Agent HA no longer bundles a custom MCP server implementation.
+
+AI Agent HA now auto-provisions/loads Home Assistant's official `mcp_server` integration and uses its tool surface in-process for chat orchestration (`_mcp_tool_calls`).
 
 For MCP client access, use Home Assistant's official **Model Context Protocol Server** integration (`mcp_server`):
 - Add `Model Context Protocol Server` in Home Assistant (**Settings → Devices & services → Add Integration**)

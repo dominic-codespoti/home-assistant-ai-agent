@@ -7,16 +7,20 @@ import logging
 import voluptuous as vol
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import llm
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .agent import AiAgentHaAgent
 from .const import DOMAIN
+from .official_mcp_bridge import OfficialMCPBridge
 
 _LOGGER = logging.getLogger(__name__)
+MCP_SERVER_DOMAIN = "mcp_server"
 
 # Config schema - this integration only supports config entries
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -27,6 +31,60 @@ SERVICE_SCHEMA = vol.Schema(
         vol.Optional("prompt"): cv.string,
     }
 )
+
+
+async def _async_ensure_official_mcp_bridge(
+    hass: HomeAssistant,
+) -> OfficialMCPBridge | None:
+    """Ensure official mcp_server is configured and loaded, then return a bridge.
+
+    Returns None only in mocked/non-standard test environments where config entries
+    cannot be introspected as normal lists.
+    """
+
+    entries = hass.config_entries.async_entries(MCP_SERVER_DOMAIN)
+    if not isinstance(entries, list):
+        _LOGGER.debug(
+            "Skipping mcp_server auto-setup in non-standard test environment"
+        )
+        return None
+
+    if not entries:
+        _LOGGER.info("No mcp_server config entry found; creating default entry")
+        flow_result = await hass.config_entries.flow.async_init(
+            MCP_SERVER_DOMAIN,
+            context={"source": "user"},
+            data={CONF_LLM_HASS_API: [llm.LLM_API_ASSIST]},
+        )
+        if flow_result.get("type") not in {"create_entry", "abort"}:
+            raise ConfigEntryNotReady(
+                f"Unable to create mcp_server entry: {flow_result.get('type')}"
+            )
+        entries = hass.config_entries.async_entries(MCP_SERVER_DOMAIN)
+        if not entries:
+            raise ConfigEntryNotReady(
+                "mcp_server entry is required but was not created successfully"
+            )
+
+    loaded_entry = next(
+        (
+            config_entry
+            for config_entry in entries
+            if config_entry.state == ConfigEntryState.LOADED
+        ),
+        None,
+    )
+    mcp_entry = loaded_entry or entries[0]
+
+    if mcp_entry.state != ConfigEntryState.LOADED:
+        if not await hass.config_entries.async_setup(mcp_entry.entry_id):
+            raise ConfigEntryNotReady("Failed to load mcp_server integration")
+
+        mcp_entry = hass.config_entries.async_get_entry(mcp_entry.entry_id) or mcp_entry
+        if mcp_entry.state != ConfigEntryState.LOADED:
+            raise ConfigEntryNotReady("mcp_server integration did not reach loaded state")
+
+    return OfficialMCPBridge(hass, mcp_entry)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -75,7 +133,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise ConfigEntryNotReady("Config entry missing required 'ai_provider' key")
 
         if DOMAIN not in hass.data:
-            hass.data[DOMAIN] = {"agents": {}, "configs": {}}
+            hass.data[DOMAIN] = {"agents": {}, "configs": {}, "mcp_bridge": None}
+
+        if hass.data[DOMAIN].get("mcp_bridge") is None:
+            hass.data[DOMAIN]["mcp_bridge"] = await _async_ensure_official_mcp_bridge(
+                hass
+            )
 
         provider = config_data["ai_provider"]
 
@@ -114,7 +177,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ]
             },
         )
-        hass.data[DOMAIN]["agents"][provider] = AiAgentHaAgent(hass, config_data)
+        hass.data[DOMAIN]["agents"][provider] = AiAgentHaAgent(
+            hass,
+            config_data,
+            mcp_bridge=hass.data[DOMAIN].get("mcp_bridge"),
+        )
 
         _LOGGER.info("Successfully set up AI Agent HA for provider: %s", provider)
 

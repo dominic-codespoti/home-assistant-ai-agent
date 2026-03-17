@@ -11,7 +11,8 @@
     ],
     "config_flow": true,
     "dependencies": [
-        "http"
+        "http",
+        "mcp_server"
     ],
     "documentation": "https://github.com/dominic-codespoti/home-assistant-ai-agent",
     "integration_type": "service",
@@ -21,5 +22,5 @@
         "aiohttp>=3.8.0",
         "google-genai"
     ],
-    "version": "1.32"
+    "version": "1.33"
 }

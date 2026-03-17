@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Replaced the legacy bundled MCP runtime with Home Assistant's official `mcp_server` integration model.
-- Updated agent orchestration to use structured JSON `data_request` / `call_service` / `final_response` flow without internal MCP tool-calling execution.
+- Updated agent orchestration to consume official MCP tools directly via `_mcp_tool_calls` and `final_response` flow.
+- Added in-process official MCP bridge and startup auto-provisioning/loading of `mcp_server` config entries.
 - Optimized Gemini SDK client for balanced latency/reliability/cost:
   - Added request timeout handling to prevent long hangs
   - Capped Gemini output tokens for lower average cost

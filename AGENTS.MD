@@ -8,15 +8,16 @@ This file serves as the definitive architecture guide and rulebook for AI agents
 The `ai_agent_ha` integration is a unified Home Assistant custom integration that routes natural language queries to various AI providers (OpenAI, Gemini, Anthropic, Alter, z.ai, Llama, Local, OpenRouter).
 
 ### Core Components (`custom_components/ai_agent_ha/`)
-- **`__init__.py`**: Integration entry point. Handles setup, config entry validation, panel registration, and exposes HA services (`query`, `create_automation`, `create_dashboard`, etc.).
+- **`__init__.py`**: Integration entry point. Handles setup, config entry validation, auto-provisions/loads Home Assistant’s official `mcp_server` config entry, panel registration, and exposes HA services (`query`, `create_automation`, `create_dashboard`, etc.).
 - **`agent.py`**: The brain of the operation. Contains:
   - **Provider Clients:** Classes inheriting from `BaseAIClient` (e.g., `OpenAIClient`, `GeminiClient`) that handle API-specific formatting and requests.
-  - **`AiAgentHaAgent`:** The main orchestrator class that manages conversation history, constructs system prompts with HA context, parses AI responses (often evaluating them as JSON for function execution), and handles features like automation/dashboard creation.
+  - **`AiAgentHaAgent`:** The main orchestrator class that manages conversation history, injects official MCP tool catalogs into prompts, executes `_mcp_tool_calls`, and handles features like automation/dashboard creation.
+- **`official_mcp_bridge.py`**: In-process adapter that mirrors Home Assistant official MCP server behavior by listing tools and executing tool calls via `homeassistant.helpers.llm` APIs selected by the `mcp_server` config entry.
 - **`config_flow.py`**: Manages the UI-based setup process in Home Assistant, handling API keys and model selection for different providers.
 - **`const.py`**: Central repository for all constants (`DOMAIN`, configuration keys, provider lists).
 - **`services.yaml`**: Defines the services exposed to Home Assistant UI and Automations.
 - **`dashboard_templates.py`**: Pre-defined JSON-like templates used when the AI is asked to generate new HA dashboards.
-- **MCP Access:** External MCP client connectivity is provided by Home Assistant’s official `mcp_server` integration (`/api/mcp`). This repository no longer ships a custom MCP server implementation.
+- **MCP Access:** External MCP client connectivity is provided by Home Assistant’s official `mcp_server` integration (`/api/mcp`). This repository no longer ships a custom MCP server implementation and now uses the official MCP tool surface internally for query execution.
 
 ### Frontend Components (`custom_components/ai_agent_ha/frontend/`)
 - **`ai_agent_ha-panel.js`**: Web Component implementing the chat interface in HA.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Replaced the legacy bundled MCP runtime with Home Assistant's official `mcp_server` integration model.
+- Updated agent orchestration to use structured JSON `data_request` / `call_service` / `final_response` flow without internal MCP tool-calling execution.
+
+### Removed
+- Removed the custom MCP server implementation and related legacy modules (`mcp_server.py`, `discovery.py`, `index_manager.py`, `domain_registry.py`, and `custom_tools/*`).
+- Removed stale MCP-only config/constants and the `mcp` Python package requirement.
+
 ### Fixed
 - **CRITICAL**: Fixed Anthropic API system prompt being overwritten by data payloads
   - Data responses now correctly use "user" role instead of "system" role

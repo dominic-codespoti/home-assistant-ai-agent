@@ -21,5 +21,5 @@
         "aiohttp>=3.8.0",
         "google-genai"
     ],
-    "version": "1.27"
+    "version": "1.28"
 }

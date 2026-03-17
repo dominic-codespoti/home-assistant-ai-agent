@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -50,7 +51,8 @@ class AiAgentHaAgent:
             "1. Gather required data before returning final_response.\n"
             "2. If a tool result returns no useful data, call a different tool or broaden arguments.\n"
             "3. Do not emit text outside JSON.\n"
-            "4. Never use legacy data_request/get_entities helper request types."
+            "4. Never use legacy data_request/get_entities helper request types.\n"
+            "5. If the user asks multiple things, address every request in final_response or explicitly state what's missing for each."
         ),
     }
 
@@ -62,7 +64,8 @@ class AiAgentHaAgent:
             "Use official MCP tool calls for all Home Assistant data/actions via:\n"
             "{\"request_type\": \"_mcp_tool_calls\", \"tool_calls\": [{\"name\": \"<tool_name>\", \"arguments\": {...}}]}.\n"
             "Return final output as {\"request_type\": \"final_response\", \"response\": \"...\"}.\n"
-            "Never use legacy data_request request types."
+            "Never use legacy data_request request types.\n"
+            "If user asks multiple things, you must address each request or state what info is missing for each."
         ),
     }
 
@@ -222,6 +225,23 @@ class AiAgentHaAgent:
     def _set_cached_data(self, key: str, data: Any) -> None:
         """Store data in cache with timestamp."""
         self._cache[key] = (time.time(), data)
+
+    def _extract_user_intents(self, user_query: str) -> List[str]:
+        """Extract likely separate user intents from a single message."""
+        normalized = user_query.strip()
+        if not normalized:
+            return []
+
+        chunks = re.split(
+            r"(?:\n+|\\b(?:and additionally|additionally|also|plus)\\b)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        intents = [chunk.strip(" .") for chunk in chunks if chunk and chunk.strip(" .")]
+
+        if not intents:
+            return [normalized]
+        return intents[:6]
 
     async def _get_mcp_tools(self) -> List[Dict[str, Any]]:
         """Get official MCP tools exposed by Home Assistant."""
@@ -1826,6 +1846,23 @@ Then restart Home Assistant to see your new dashboard in the sidebar."""
 
             # Add user query to conversation
             self.conversation_history.append({"role": "user", "content": user_query})
+            user_intents = self._extract_user_intents(user_query)
+            if len(user_intents) > 1:
+                self.conversation_history.append(
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "intent_checklist": user_intents,
+                                "instruction": (
+                                    "Address every intent in this checklist in your "
+                                    "final_response. If any intent cannot be completed, "
+                                    "explicitly state what is missing for that intent."
+                                ),
+                            }
+                        ),
+                    }
+                )
             _LOGGER.debug("Added user query to conversation history")
 
             max_iterations = 8  # Prevent infinite loops while allowing tool rounds

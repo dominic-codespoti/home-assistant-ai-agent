@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Data responses now correctly use "user" role instead of "system" role
   - Ensures Claude receives all formatting instructions for dashboard/automation creation
   - Resolves issue where Claude would return YAML in `final_response` instead of JSON with `dashboard_suggestion`
+- Improved multi-intent query handling so combined requests are not silently ignored
+  - Added explicit multi-request rules in system prompts
+  - Added intent checklist injection for messages containing multiple asks
+  - Live Gemini check confirms combined temperature + XVR-entity request now returns both response and missing-detail guidance
 - Fixed climate dashboard creation for users with only temperature/humidity sensors (no climate.* entities)
   - Added `get_entities_by_device_class()` helper function
   - Added `get_climate_related_entities()` to combine climate.* entities with temperature/humidity sensors

@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added explicit multi-request rules in system prompts
   - Added intent checklist injection for messages containing multiple asks
   - Live Gemini check confirms combined temperature + XVR-entity request now returns both response and missing-detail guidance
+- Improved chat bubble rendering for structured responses
+  - Added robust JSON extraction/parsing for assistant payloads in the frontend panel
+  - Rendered sectioned responses with preserved line breaks and clearer heading/bullet styling
 - Fixed climate dashboard creation for users with only temperature/humidity sensors (no climate.* entities)
   - Added `get_entities_by_device_class()` helper function
   - Added `get_climate_related_entities()` to combine climate.* entities with temperature/humidity sensors

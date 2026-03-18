@@ -260,6 +260,25 @@ class AiAgentHaPanel extends LitElement {
         box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
         word-wrap: break-word;
       }
+      .message-content {
+        white-space: pre-wrap;
+      }
+      .message-line {
+        margin: 0;
+      }
+      .message-line + .message-line {
+        margin-top: 4px;
+      }
+      .message-line.empty {
+        margin-top: 8px;
+      }
+      .message-section-title {
+        font-weight: 700;
+        margin-top: 6px;
+      }
+      .message-bullet {
+        padding-left: 12px;
+      }
       .user-message {
         background: var(--bubble-user);
         color: var(--text-primary-color);
@@ -1005,6 +1024,154 @@ class AiAgentHaPanel extends LitElement {
     }
   }
 
+  _isSectionTitle(line) {
+    return /^(Summary|Reasoning Summary|Actions Taken \/ Next Steps):$/i.test(
+      line.trim()
+    );
+  }
+
+  _renderMessageText(text) {
+    const rawText = text == null ? '' : String(text);
+    const lines = rawText.split('\n');
+
+    return lines.map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return html`<div class="message-line empty"></div>`;
+      }
+      if (this._isSectionTitle(trimmed)) {
+        return html`<div class="message-line message-section-title">${trimmed}</div>`;
+      }
+      if (trimmed.startsWith('- ')) {
+        return html`<div class="message-line message-bullet">${trimmed}</div>`;
+      }
+      return html`<div class="message-line">${line}</div>`;
+    });
+  }
+
+  _extractFirstJsonObject(rawText) {
+    if (!rawText || typeof rawText !== 'string') {
+      return null;
+    }
+
+    const start = rawText.indexOf('{');
+    if (start === -1) {
+      return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < rawText.length; i++) {
+      const ch = rawText[i];
+
+      if (inString) {
+        if (!escaped && ch === '"') {
+          inString = false;
+        }
+        escaped = !escaped && ch === '\\';
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        escaped = false;
+        continue;
+      }
+
+      if (ch === '{') {
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return rawText.slice(start, i + 1);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  _parseStructuredAnswer(answer) {
+    if (!answer || typeof answer !== 'string') {
+      return null;
+    }
+
+    const candidates = [answer.trim()];
+    const extracted = this._extractFirstJsonObject(answer);
+    if (extracted && extracted !== candidates[0]) {
+      candidates.push(extracted.trim());
+    }
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        let parsed = JSON.parse(candidate);
+
+        if (typeof parsed === 'string') {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch (_inner) {
+            // Keep original parsed string
+          }
+        }
+
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      } catch (_e) {
+        // Keep trying other candidates
+      }
+    }
+
+    return null;
+  }
+
+  _normalizeAssistantMessage(answer) {
+    const message = {
+      type: 'assistant',
+      text: answer == null ? '' : String(answer),
+    };
+    const response = this._parseStructuredAnswer(message.text);
+    if (!response) {
+      return message;
+    }
+
+    if (response.request_type === 'automation_suggestion') {
+      message.automation = response.automation;
+      message.text =
+        response.message ||
+        'I found an automation that might help you. Would you like me to create it?';
+      return message;
+    }
+
+    if (response.request_type === 'dashboard_suggestion') {
+      message.dashboard = response.dashboard;
+      message.text =
+        response.message ||
+        'I created a dashboard configuration for you. Would you like me to create it?';
+      return message;
+    }
+
+    if (response.request_type === 'final_response') {
+      message.text = response.response || response.message || message.text;
+      return message;
+    }
+
+    if (response.message) {
+      message.text = response.message;
+      return message;
+    }
+
+    if (response.response) {
+      message.text = response.response;
+      return message;
+    }
+
+    return message;
+  }
+
   render() {
     console.debug("Rendering with state:", {
       messages: this._messages,
@@ -1031,7 +1198,9 @@ class AiAgentHaPanel extends LitElement {
           <div class="messages" id="messages">
             ${this._messages.map(msg => html`
               <div class="message ${msg.type}-message">
-                ${msg.text}
+                <div class="message-content">
+                  ${this._renderMessageText(msg.text)}
+                </div>
                 ${msg.automation ? html`
                   <div class="automation-suggestion">
                     <div class="automation-title">${msg.automation.alias}</div>
@@ -1269,48 +1438,7 @@ class AiAgentHaPanel extends LitElement {
         return;
       }
 
-      let message = { type: 'assistant', text: event.data.answer };
-
-      // Check if the response contains an automation or dashboard suggestion
-      try {
-        console.debug("Attempting to parse response as JSON:", event.data.answer);
-        let jsonText = event.data.answer;
-        
-        // Try to extract JSON from mixed text+JSON responses
-        const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-        if (jsonMatch && jsonMatch[0] !== jsonText.trim()) {
-          console.debug("Found JSON within mixed response, extracting:", jsonMatch[0]);
-          jsonText = jsonMatch[0];
-        }
-        
-        const response = JSON.parse(jsonText);
-        console.debug("Parsed JSON response:", response);
-        
-        if (response.request_type === 'automation_suggestion') {
-          console.debug("Found automation suggestion");
-          message.automation = response.automation;
-          message.text = response.message || 'I found an automation that might help you. Would you like me to create it?';
-        } else if (response.request_type === 'dashboard_suggestion') {
-          console.debug("Found dashboard suggestion:", response.dashboard);
-          message.dashboard = response.dashboard;
-          message.text = response.message || 'I created a dashboard configuration for you. Would you like me to create it?';
-        } else if (response.request_type === 'final_response') {
-          // If it's a final response, use the response field
-          message.text = response.response || response.message || event.data.answer;
-        } else if (response.message) {
-          // If there's a message field, use it
-          message.text = response.message;
-        } else if (response.response) {
-          // If there's a response field, use it
-          message.text = response.response;
-        }
-        // If none of the above, keep the original event.data.answer as message.text
-      } catch (e) {
-        // Not a JSON response, treat as normal message
-        console.debug("Response is not JSON, using as-is:", event.data.answer);
-        console.debug("JSON parse error:", e);
-        // message.text is already set to event.data.answer
-      }
+      const message = this._normalizeAssistantMessage(event.data.answer);
 
       console.debug("Adding message to UI:", message);
       this._messages = [...this._messages, message];
